@@ -1,12 +1,35 @@
+import { resolve } from "node:path";
 import { Command, CommanderError } from "commander";
-import { EXIT_OK, exitCodeFor, XrError } from "../errors/index.ts";
-import { createOutput, pickModes, type Report } from "../output/index.ts";
+import { configShow } from "../commands/config/show.ts";
+import {
+  CODEBASE_PATH_HINT,
+  ConfigError,
+  type Discovery,
+  discover,
+  loadConfig,
+} from "../config/index.ts";
+import {
+  type ErrorCode,
+  EXIT_OK,
+  exitCodeFor,
+  XrError,
+} from "../errors/index.ts";
+import {
+  createOutput,
+  type Output,
+  pickModes,
+  type Report,
+} from "../output/index.ts";
 
 export interface MainOptions {
   version: string;
   argv: readonly string[];
   env: Readonly<Record<string, string | undefined>>;
   isTTY: { stdin: boolean; stdout: boolean; stderr: boolean };
+  /** The current folder. Only discovery reads it, and only without `--codebase-path`. */
+  cwd: string;
+  /** `os.homedir()`: the user config level and `~` in paths. */
+  home: string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
 }
@@ -28,20 +51,33 @@ export interface GlobalFlags {
   verbose: boolean;
 }
 
+/** cli may not import `domain`, so it reads the command and ctx types off a command. */
+type CommandUnit = typeof configShow;
+type Ctx = Parameters<CommandUnit["run"]>[0];
+
 const USAGE_HINT = "Run `xr --help` for usage.";
 const BUG_HINT =
   "This is a bug in xr. Run it again with `--verbose` and report the output at https://github.com/alexsuprun/crossrepo/issues.";
 
+/** What commander picked: a ready Report (help, version) or a command to run. */
+interface Parsed {
+  report?: Report;
+  command?: CommandUnit;
+}
+
 /** Runs the `xr` CLI on `argv` (without the node and script paths) and returns the exit code. */
 export function main(options: MainOptions): number {
   let commanderOutput = "";
-  const result: { report?: Report } = {};
-  const program = createProgram(options.version, {
+  const parsed: Parsed = {};
+  const program = createProgram({
     write: (text) => {
       commanderOutput += text;
     },
-    done: (report) => {
-      result.report = report;
+    help: (text) => {
+      parsed.report = helpReport(text);
+    },
+    select: (command) => {
+      parsed.command = command;
     },
   });
 
@@ -49,26 +85,37 @@ export function main(options: MainOptions): number {
   try {
     program.parse([...options.argv], { from: "user" });
   } catch (thrown) {
-    // commander still reads the known options when it rejects argv, so `--version` wins, as `.version()` did.
-    if (
-      thrown instanceof CommanderError &&
-      program.opts<ParsedFlags>().version
-    ) {
-      result.report = versionReport(options.version);
-    } else if (
-      thrown instanceof CommanderError &&
-      thrown.exitCode === EXIT_OK
-    ) {
-      result.report = {
-        data: { help: commanderOutput },
-        text: commanderOutput,
-      };
+    if (thrown instanceof CommanderError && thrown.exitCode === EXIT_OK) {
+      parsed.report = helpReport(commanderOutput);
     } else {
       failure = { error: toXrError(thrown), thrown };
     }
   }
+  // commander still reads the known options when it rejects argv, so `--version` wins, as `.version()` did.
+  if (
+    program.opts<ParsedFlags>().version &&
+    (!failure || failure.thrown instanceof CommanderError)
+  ) {
+    failure = undefined;
+    parsed.report = {
+      blocks: [{ type: "value", key: "version", value: options.version }],
+    };
+    parsed.command = undefined;
+  }
 
   const flags = readGlobalFlags(program.opts<ParsedFlags>(), options.isTTY);
+  let discovery: FoundCodebase | undefined;
+  if (!failure && parsed.command) {
+    try {
+      discovery = checkKind(
+        parsed.command,
+        discover(resolve(options.cwd, flags.codebasePath ?? ".")),
+      );
+    } catch (thrown) {
+      failure = { error: toXrError(thrown), thrown };
+    }
+  }
+
   const out = createOutput({
     modes: pickModes({
       json: flags.json,
@@ -77,30 +124,90 @@ export function main(options: MainOptions): number {
     }),
     stdout: options.stdout,
     stderr: options.stderr,
+    home: options.home,
+    codebase: discovery?.codebase,
   });
   if (!failure) {
-    out.report(result.report ?? {});
-    return EXIT_OK;
+    try {
+      const report =
+        parsed.command && discovery
+          ? runCommand(parsed.command, discovery, flags, options.home, out)
+          : (parsed.report ?? { blocks: [] });
+      out.report(report);
+      return EXIT_OK;
+    } catch (thrown) {
+      failure = { error: toXrError(thrown), thrown };
+    }
   }
   if (flags.verbose && failure.error.code === "internal") {
     out.trace(stackOf(failure.thrown));
   }
-  out.report({ error: failure.error });
+  const { code, message, hint } = failure.error;
+  out.report({ blocks: [], error: { code, message, hint } });
   return exitCodeFor(failure.error);
 }
 
-function createProgram(
-  version: string,
-  {
-    write,
-    done,
-  }: { write: (text: string) => void; done: (report: Report) => void },
-): Command {
+/** Loads the config once, emits one warning per unknown key, builds `ctx` and runs the command. */
+function runCommand(
+  command: CommandUnit,
+  discovery: FoundCodebase,
+  flags: GlobalFlags,
+  home: string,
+  out: Output,
+): Report {
+  const config = loadConfig({ home, codebase: discovery.codebase });
+  for (const unknown of config.unknownKeys) {
+    out.emit({
+      type: "warning",
+      warning: {
+        code: "unknown-config-key",
+        message: `Unknown config key \`${unknown.key}\` in ${unknown.files.join(", ")}.`,
+        hint: `did you mean ${unknown.suggestion}?`,
+      },
+    });
+  }
+  const ctx: Ctx = {
+    out: { emit: (event) => out.emit(event) },
+    config,
+    discovery,
+    interactive: flags.interactive,
+  };
+  return command.run(ctx);
+}
+
+type FoundCodebase = Exclude<Discovery, { kind: "none" }>;
+
+/**
+ * `cli` checks the folder kind, so commands never do (AD-9). No command accepts
+ * `none` yet, and the config load needs a codebase.
+ */
+function checkKind(command: CommandUnit, discovery: Discovery): FoundCodebase {
+  if (discovery.kind !== "none" && command.accepts.includes(discovery.kind)) {
+    return discovery;
+  }
+  throw new XrError({
+    code: "not-a-codebase",
+    message:
+      discovery.kind === "none"
+        ? `${discovery.dir} is not a crossrepo codebase or project.`
+        : `${discovery.dir} is a ${discovery.kind}, and this command needs a codebase.`,
+    hint: CODEBASE_PATH_HINT,
+  });
+}
+
+interface ProgramHooks {
+  write: (text: string) => void;
+  help: (text: string) => void;
+  select: (command: CommandUnit) => void;
+}
+
+function createProgram({ write, help, select }: ProgramHooks): Command {
   const program: Command = new Command("xr")
     .description(
       "Create, sync and remove the same git worktree branch across many sibling repos.",
     )
     .helpOption("-h, --help", "print this help")
+    .helpCommand(false)
     .option("-V, --version", "print the version")
     .option("--codebase-path <path>", "path to the codebase")
     .option("--json", "print the result as one JSON object")
@@ -112,19 +219,23 @@ function createProgram(
       writeErr: write,
       outputError: () => {},
     })
-    .action(() => {
-      if (program.opts<ParsedFlags>().version) {
-        done(versionReport(version));
-      } else {
-        const help = program.helpInformation();
-        done({ data: { help }, text: help });
-      }
-    });
+    .action(() => help(program.helpInformation()));
+
+  const config: Command = program
+    .command("config")
+    .description("show the config")
+    .helpOption("-h, --help", "print this help")
+    .action(() => help(config.helpInformation()));
+  config
+    .command("show")
+    .description("print the merged config and the file that gives each value")
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(configShow));
   return program;
 }
 
-function versionReport(version: string): Report {
-  return { data: { version }, text: `${version}\n` };
+function helpReport(help: string): Report {
+  return { blocks: [{ type: "value", key: "help", value: help }] };
 }
 
 /** Reads the 4 global flags and computes `interactive` once. */
@@ -148,10 +259,26 @@ function stackOf(thrown: unknown): string {
     : String(thrown);
 }
 
-/** Turns anything thrown into an `XrError`: commander errors become `usage`, the rest `internal`. */
+const CONFIG_ERROR_CODES: Record<ConfigError["kind"], ErrorCode> = {
+  conflict: "config-conflict",
+  invalid: "invalid-config",
+  "not-a-codebase": "not-a-codebase",
+};
+
+/**
+ * Turns anything thrown into an `XrError`: a `ConfigError` keeps its meaning,
+ * commander errors become `usage`, the rest `internal`.
+ */
 export function toXrError(thrown: unknown): XrError {
   if (thrown instanceof XrError) {
     return thrown;
+  }
+  if (thrown instanceof ConfigError) {
+    return new XrError({
+      code: CONFIG_ERROR_CODES[thrown.kind],
+      message: thrown.message,
+      hint: thrown.hint,
+    });
   }
   if (thrown instanceof CommanderError) {
     return new XrError({

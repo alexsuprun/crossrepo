@@ -14,6 +14,7 @@ export default defineConfig({
 			sidebar: [
 				{ label: 'Install', slug: 'install' },
 				{ label: 'Output and errors', slug: 'output' },
+				{ label: 'Commands', items: [{ label: 'xr config show', slug: 'commands/config-show' }] },
 			],
 			plugins: [starlightLlmsTxt()],
 		}),

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { join, sep } from "node:path";
 import {
+  type Block,
   createOutput,
   type Mode,
   pickModes,
@@ -70,10 +72,19 @@ describe("pickModes", () => {
   });
 });
 
-function capture(stdoutMode: Mode, stderrMode: TextMode = "plain") {
+const HOME = join(sep, "home", "me");
+const CODEBASE = join(HOME, "code", "shop");
+
+function capture(
+  stdoutMode: Mode,
+  stderrMode: TextMode = "plain",
+  codebase: string | null = CODEBASE,
+) {
   const written = { stdout: "", stderr: "" };
   const out = createOutput({
     modes: { stdout: stdoutMode, stderr: stderrMode },
+    home: HOME,
+    codebase: codebase ?? undefined,
     stdout: (text) => {
       written.stdout += text;
     },
@@ -146,10 +157,36 @@ describe("trace", () => {
   });
 });
 
+const version: Block = { type: "value", key: "version", value: "1.2.3" };
+
+const entries: Block = {
+  type: "fields",
+  key: "entries",
+  items: [
+    {
+      key: "name",
+      value: "shop",
+      source: { path: join(CODEBASE, ".crossrepo", "config.yaml") },
+    },
+    {
+      key: "projects-dir",
+      value: "~/p",
+      source: { path: join(HOME, ".crossrepo", "config.yaml") },
+      extra: { resolved: { path: join(HOME, "p") } },
+    },
+    {
+      key: "project.post-create",
+      value: ["npm ci", { code: "cp .env x" }],
+      source: { path: join(sep, "etc", "x.yaml") },
+    },
+    { key: "repos.api.remote", value: "git@h:api.git" },
+  ],
+};
+
 describe("report in json mode", () => {
   test("is exactly one JSON object on stdout with ok and warnings", () => {
     const { out, written } = capture("json");
-    out.report({ data: { version: "1.2.3" }, text: "1.2.3\n" });
+    out.report({ blocks: [version] });
     expect(written.stderr).toBe("");
     expect(written.stdout.endsWith("\n")).toBe(true);
     expect(written.stdout.trimEnd().split("\n")).toHaveLength(1);
@@ -165,7 +202,7 @@ describe("report in json mode", () => {
       warning: { code: "a", message: "first", hint: "h" },
     });
     out.emit({ type: "warning", warning: { code: "b", message: "second" } });
-    out.report({});
+    out.report({ blocks: [] });
     expect(JSON.parse(written.stdout)).toEqual({
       ok: true,
       warnings: [
@@ -176,9 +213,38 @@ describe("report in json mode", () => {
     expect(written.stderr).toBe("! first\n  h\n! second\n");
   });
 
+  test("a fields block is a list with absolute paths, plain codes and extra spread in", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [entries] });
+    expect(JSON.parse(written.stdout)).toEqual({
+      ok: true,
+      warnings: [],
+      entries: [
+        {
+          key: "name",
+          value: "shop",
+          source: join(CODEBASE, ".crossrepo", "config.yaml"),
+        },
+        {
+          key: "projects-dir",
+          value: "~/p",
+          source: join(HOME, ".crossrepo", "config.yaml"),
+          resolved: join(HOME, "p"),
+        },
+        {
+          key: "project.post-create",
+          value: ["npm ci", "cp .env x"],
+          source: join(sep, "etc", "x.yaml"),
+        },
+        { key: "repos.api.remote", value: "git@h:api.git" },
+      ],
+    });
+  });
+
   test("a failure has ok false and the error with only the fields it has", () => {
     const { out, written } = capture("json");
     out.report({
+      blocks: [],
       error: { code: "internal", message: "boom", hint: undefined },
     });
     expect(written.stdout).toBe(
@@ -187,68 +253,227 @@ describe("report in json mode", () => {
     expect(written.stderr).toBe("");
   });
 
-  test("a failure keeps hint, details and the command's own fields", () => {
+  test("a failure keeps the hint, the report blocks, and the error blocks as details", () => {
     const { out, written } = capture("json");
     out.report({
-      data: { repos: [{ repo: "api", status: "failed" }] },
+      blocks: [version],
       error: {
         code: "repos-failed",
         message: "1 repo failed",
         hint: "Run again.",
-        details: { failed: 1 },
+        blocks: [{ type: "value", key: "failed", value: "api" }],
       },
     });
     expect(JSON.parse(written.stdout)).toEqual({
       ok: false,
       warnings: [],
-      repos: [{ repo: "api", status: "failed" }],
+      version: "1.2.3",
       error: {
         code: "repos-failed",
         message: "1 repo failed",
         hint: "Run again.",
-        details: { failed: 1 },
+        details: { failed: "api" },
       },
     });
   });
 });
 
+describe("report keys", () => {
+  for (const key of ["ok", "warnings", "error"]) {
+    test(`a block with the reserved key ${key} throws`, () => {
+      const { out, written } = capture("json");
+      expect(() =>
+        out.report({ blocks: [{ type: "value", key, value: "x" }] }),
+      ).toThrow(`reserved`);
+      expect(written.stdout).toBe("");
+    });
+  }
+
+  test("two blocks with one key throw, in every mode", () => {
+    for (const mode of ["json", "plain"] as const) {
+      const { out, written } = capture(mode);
+      expect(() => out.report({ blocks: [version, version] })).toThrow(
+        "version",
+      );
+      expect(written.stdout).toBe("");
+    }
+  });
+
+  test("two error blocks with one key throw", () => {
+    const { out } = capture("json");
+    expect(() =>
+      out.report({
+        blocks: [],
+        error: { code: "x", message: "y", blocks: [version, version] },
+      }),
+    ).toThrow("version");
+  });
+
+  test("an error block may use a reserved key, since it sits under details", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [],
+      error: {
+        code: "x",
+        message: "y",
+        blocks: [{ type: "value", key: "ok", value: "1" }],
+      },
+    });
+    expect(JSON.parse(written.stdout).error.details).toEqual({ ok: "1" });
+  });
+
+  test("block types without a renderer yet throw", () => {
+    const blocks: Block[] = [
+      { type: "repos", items: [] },
+      { type: "checks", items: [] },
+      { type: "leftovers", items: [] },
+      { type: "section", key: "s", title: "S", blocks: [] },
+      { type: "note", tone: "ok", text: "n" },
+    ];
+    for (const block of blocks) {
+      for (const mode of ["json", "plain"] as const) {
+        const { out } = capture(mode);
+        expect(() => out.report({ blocks: [block] })).toThrow(block.type);
+      }
+    }
+  });
+});
+
 describe("report in text mode", () => {
-  test("prints the text on stdout and nothing on stderr", () => {
+  test("a value block prints the value alone on stdout and nothing on stderr", () => {
     const { out, written } = capture("plain");
-    out.report({ data: { version: "1.2.3" }, text: "1.2.3\n" });
+    out.report({ blocks: [version] });
     expect(written).toEqual({ stdout: "1.2.3\n", stderr: "" });
   });
 
-  test("prints no text on stdout when the report has an error", () => {
+  test("a value that ends with a new line is not given a second one", () => {
     const { out, written } = capture("plain");
-    out.report({
-      data: { version: "1.2.3" },
-      text: "1.2.3\n",
-      error: { code: "internal", message: "boom" },
-    });
-    expect(written).toEqual({ stdout: "", stderr: "error: boom\n" });
+    out.report({ blocks: [{ type: "value", key: "help", value: "a\nb\n" }] });
+    expect(written.stdout).toBe("a\nb\n");
   });
 
-  test("prints an error with its hint on stderr only", () => {
+  test("puts one blank line between blocks", () => {
     const { out, written } = capture("plain");
     out.report({
-      error: { code: "usage", message: "bad flag", hint: "Run it right." },
+      blocks: [version, { type: "value", key: "other", value: "x" }],
+    });
+    expect(written.stdout).toBe("1.2.3\n\nx\n");
+  });
+
+  test("an empty report prints nothing", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [] });
+    expect(written).toEqual({ stdout: "", stderr: "" });
+  });
+
+  test("a fields block prints aligned key = value lines with extra and source after them", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [entries] });
+    expect(written.stdout).toBe(
+      [
+        "name                = shop           .crossrepo/config.yaml",
+        `projects-dir        = ~/p            resolved ${join("~", "p")}  ${join("~", ".crossrepo", "config.yaml")}`,
+        `project.post-create =                ${join(sep, "etc", "x.yaml")}`,
+        "  npm ci",
+        "  cp .env x",
+        "repos.api.remote    = git@h:api.git",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("a path is relative to the codebase, else to ~, else absolute", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [
+        {
+          type: "fields",
+          key: "f",
+          items: [
+            { key: "a", value: { path: CODEBASE } },
+            { key: "b", value: { path: join(CODEBASE, "x") } },
+            { key: "c", value: { path: HOME } },
+            { key: "d", value: { path: join(HOME, "y") } },
+            { key: "e", value: { path: join(sep, "opt") } },
+            { key: "f", value: { path: `${CODEBASE}-other` } },
+          ],
+        },
+      ],
+    });
+    expect(written.stdout).toBe(
+      [
+        "a = .",
+        "b = x",
+        "c = ~",
+        `d = ${join("~", "y")}`,
+        `e = ${join(sep, "opt")}`,
+        `f = ${join("~", "code", "shop-other")}`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("without a codebase a path is relative to ~ only", () => {
+    const { out, written } = capture("plain", "plain", null);
+    out.report({
+      blocks: [
+        { type: "value", key: "p", value: { path: join(CODEBASE, "x") } },
+      ],
+    });
+    expect(written.stdout).toBe(`${join("~", "code", "shop", "x")}\n`);
+  });
+
+  test("rich stdout mutes extra and source and keeps the value plain", () => {
+    const { out, written } = capture("rich");
+    out.report({ blocks: [entries] });
+    expect(written.stdout).toContain(ESC);
+    expect(written.stdout).toContain("name                = shop");
+  });
+
+  test("plain stdout has no escape codes", () => {
+    const { out, written } = capture("plain", "rich");
+    out.report({ blocks: [entries] });
+    expect(written.stdout).not.toContain(ESC);
+  });
+
+  test("prints nothing on stdout when the report has an error", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [version],
+      error: { code: "internal", message: "boom" },
+    });
+    expect(written).toEqual({ stdout: "", stderr: "1.2.3\n\nerror: boom\n" });
+  });
+
+  test("prints an error with its hint and then its blocks on stderr only", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [],
+      error: {
+        code: "usage",
+        message: "bad flag",
+        hint: "Run it right.",
+        blocks: [{ type: "value", key: "v", value: "detail" }],
+      },
     });
     expect(written).toEqual({
       stdout: "",
-      stderr: "error: bad flag\nRun it right.\n",
+      stderr: "error: bad flag\nRun it right.\n\ndetail\n",
     });
   });
 
   test("prints an error without a hint as one line", () => {
     const { out, written } = capture("rich", "plain");
-    out.report({ error: { code: "internal", message: "boom" } });
+    out.report({ blocks: [], error: { code: "internal", message: "boom" } });
     expect(written).toEqual({ stdout: "", stderr: "error: boom\n" });
   });
 
   test("styles the error on a rich stderr", () => {
     const { out, written } = capture("plain", "rich");
-    out.report({ error: { code: "usage", message: "bad", hint: "h" } });
+    out.report({
+      blocks: [],
+      error: { code: "usage", message: "bad", hint: "h" },
+    });
     expect(written.stderr).toContain(ESC);
     expect(written.stderr).toContain("bad");
   });
