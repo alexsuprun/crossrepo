@@ -76,6 +76,8 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
       const result = spawnSync(command, [bundle, "config", "show", "--json"], {
         encoding: "utf8",
         cwd: codebase,
+        // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+        env: { ...process.env },
       });
       expect(result.error).toBeUndefined();
       expect(result.status).toBe(0);
