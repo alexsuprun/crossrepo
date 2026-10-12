@@ -371,7 +371,7 @@ describe("report in text mode", () => {
     out.report({ blocks: [entries] });
     expect(written.stdout).toBe(
       [
-        "name                = shop           .crossrepo/config.yaml",
+        `name                = shop           ${join(".crossrepo", "config.yaml")}`,
         `projects-dir        = ~/p            resolved ${join("~", "p")}  ${join("~", ".crossrepo", "config.yaml")}`,
         `project.post-create =                ${join(sep, "etc", "x.yaml")}`,
         "  npm ci",
