@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolate, writeFile } from "../helpers/isolate.ts";
 import { smokeRuntimes } from "../helpers/smoke-runtimes.ts";
 
 const bundle = fileURLToPath(new URL("../../dist/xr.js", import.meta.url));
@@ -57,6 +59,45 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     });
     expect(result.status).toBe(2);
     expect(result.stderr).not.toContain("\u001b[");
+  });
+
+  test("config show --json in a codebase prints one JSON object with entries", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const file = writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        "name: shop\n",
+      );
+      const userFile = writeFile(
+        join(iso.home, ".crossrepo", "config.yaml"),
+        "projects-dir: ~/p\n",
+      );
+      const result = spawnSync(command, [bundle, "config", "show", "--json"], {
+        encoding: "utf8",
+        cwd: codebase,
+        // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+        env: { ...process.env },
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        entries: [
+          { key: "name", value: "shop", source: file },
+          {
+            key: "projects-dir",
+            value: "~/p",
+            source: userFile,
+            resolved: join(iso.home, "p"),
+          },
+        ],
+      });
+    } finally {
+      iso.restore();
+    }
   });
 
   test("--json --nope prints one JSON error object on stdout and exits 2", () => {

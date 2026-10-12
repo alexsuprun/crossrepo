@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Command } from "commander";
 import { main, readGlobalFlags, toXrError } from "../../src/cli/index.ts";
+import { ConfigError } from "../../src/config/index.ts";
 import { XrError } from "../../src/errors/index.ts";
 
 interface RunOptions {
@@ -16,6 +17,8 @@ function run(argv: string[], options: RunOptions = {}) {
     argv,
     env: options.env ?? {},
     isTTY: options.isTTY ?? { stdin: false, stdout: false, stderr: false },
+    cwd: "/nowhere",
+    home: "/home/me",
     stdout: (text) => {
       stdout += text;
     },
@@ -79,6 +82,30 @@ describe("main", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
+  });
+
+  test("--help lists the config command", () => {
+    expect(run(["--help"]).stdout).toContain("config");
+  });
+
+  test("config with no subcommand prints its help and exits 0", () => {
+    const result = run(["config"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Usage: xr config");
+    expect(result.stdout).toContain("show");
+  });
+
+  test("an unknown subcommand or argument is a usage error", () => {
+    for (const argv of [
+      ["config", "nope"],
+      ["config", "show", "x"],
+    ]) {
+      const result = run(argv);
+      expect(result.code).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(USAGE_HINT);
+    }
   });
 
   test("unknown option prints an error on stderr only and exits 2", () => {
@@ -311,6 +338,20 @@ describe("toXrError", () => {
     expect(error.code).toBe("internal");
     expect(error.message).toBe("boom");
     expect(error.hint).toContain("--verbose");
+  });
+
+  test("maps each ConfigError kind to its code and keeps message and hint", () => {
+    for (const [kind, code] of [
+      ["conflict", "config-conflict"],
+      ["invalid", "invalid-config"],
+      ["not-a-codebase", "not-a-codebase"],
+    ] as const) {
+      const error = toXrError(
+        new ConfigError({ kind, message: "m", hint: "h" }),
+      );
+      expect(error).toBeInstanceOf(XrError);
+      expect([error.code, error.message, error.hint]).toEqual([code, "m", "h"]);
+    }
   });
 
   test("turns a thrown non-error into an internal XrError", () => {

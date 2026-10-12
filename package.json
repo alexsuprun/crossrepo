@@ -38,7 +38,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
-    "test": "bun test",
+    "test": "bun test --coverage",
     "test:unit": "bun test tests/unit",
     "test:adapters": "bun test tests/adapters --pass-with-no-tests",
     "test:commands": "bun test tests/commands --pass-with-no-tests",

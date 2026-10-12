@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { homedir } from "node:os";
 import { main } from "./index.ts";
 
 /** Replaced at build time by `bun build --define`. */
@@ -13,6 +14,8 @@ process.exitCode = main({
     stdout: process.stdout.isTTY === true,
     stderr: process.stderr.isTTY === true,
   },
+  cwd: process.cwd(),
+  home: homedir(),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
 });

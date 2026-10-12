@@ -1,5 +1,12 @@
 /** Every `XrError` code. A new failure reuses a code when the meaning is the same. */
-export const ERROR_CODES = ["usage", "internal"] as const;
+export const ERROR_CODES = [
+  "usage",
+  "internal",
+  "not-a-codebase",
+  "unknown-config-key",
+  "config-conflict",
+  "invalid-config",
+] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

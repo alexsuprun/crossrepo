@@ -87,6 +87,15 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | --- | --- |
 | `usage` | A bad flag, an unknown command or a missing option value. |
 | `internal` | A bug in `xr`. Run the command again with `--verbose` and report the output on [GitHub](https://github.com/alexsuprun/crossrepo/issues). |
+| `not-a-codebase` | The folder is not a codebase or a project, or the project's `codebase` path is not a codebase. Use `--codebase-path <path>`. |
+| `config-conflict` | One config level has both a `.yaml` and a `.yml` file. |
+| `invalid-config` | A config file is not valid YAML, or a value has the wrong type. |
+
+Warning codes, in `warnings`:
+
+| Code | Meaning |
+| --- | --- |
+| `unknown-config-key` | A config file has a key that `xr` does not know. The hint names the closest known key. The command still runs. |
 
 New commands add new codes. A script must handle a code that it does not know as a failure.
 
