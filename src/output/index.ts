@@ -19,7 +19,7 @@ export interface PickModesInput {
 
 /**
  * Picks the mode of each stream. Only stdout can be `json`. `FORCE_COLOR` wins
- * over `NO_COLOR`, the same as Node.
+ * over `NO_COLOR`, and only the values Node reads as color give `rich`.
  */
 export function pickModes({ json, env, isTTY }: PickModesInput): StreamModes {
   return {
@@ -28,8 +28,12 @@ export function pickModes({ json, env, isTTY }: PickModesInput): StreamModes {
   };
 }
 
+const FORCE_COLOR_ON = ["", "1", "2", "3", "true"];
+
 function textMode(env: PickModesInput["env"], isTTY: boolean): TextMode {
-  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== "0") return "rich";
+  if (env.FORCE_COLOR !== undefined) {
+    return FORCE_COLOR_ON.includes(env.FORCE_COLOR) ? "rich" : "plain";
+  }
   if (env.NO_COLOR) return "plain";
   if (env.TERM === "dumb") return "plain";
   return isTTY ? "rich" : "plain";
@@ -149,7 +153,7 @@ export function createOutput({
         stdout(`${JSON.stringify(envelope(warnings, data, error))}\n`);
         return;
       }
-      if (text) stdout(text);
+      if (text && !error) stdout(text);
       if (error) {
         line(`${paint("error", "error:")} ${error.message}`);
         if (error.hint) line(paint("muted", error.hint));
@@ -169,11 +173,6 @@ function envelope(
     ok: false,
     warnings,
     ...data,
-    error: {
-      code,
-      message,
-      ...(hint === undefined ? {} : { hint }),
-      ...(details === undefined ? {} : { details }),
-    },
+    error: { code, message, hint, details },
   };
 }

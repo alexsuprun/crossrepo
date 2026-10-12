@@ -27,6 +27,8 @@ function run(argv: string[], options: RunOptions = {}) {
 }
 
 const USAGE_HINT = "Run `xr --help` for usage.";
+const BUG_HINT =
+  "This is a bug in xr. Run it again with `--verbose` and report the output at https://github.com/alexsuprun/crossrepo/issues.";
 
 describe("main", () => {
   test("--version prints only the version on stdout and exits 0", () => {
@@ -35,6 +37,19 @@ describe("main", () => {
       stdout: "1.2.3\n",
       stderr: "",
     });
+  });
+
+  test("--version wins over a usage error or --help, as commander .version() did", () => {
+    for (const argv of [
+      ["--version", "--nope"],
+      ["--nope", "--version"],
+      ["--version", "extra"],
+      ["--version", "--codebase-path"],
+      ["--version", "--help"],
+      ["--help", "--version"],
+    ]) {
+      expect(run(argv)).toEqual({ code: 0, stdout: "1.2.3\n", stderr: "" });
+    }
   });
 
   test("--help prints usage with the 4 global flags on stdout and exits 0", () => {
@@ -82,6 +97,14 @@ describe("main", () => {
     expect(result.stderr).toContain(USAGE_HINT);
   });
 
+  test("--verbose prints no stack trace for a usage error", () => {
+    expect(run(["--verbose", "--nope"])).toEqual({
+      code: 2,
+      stdout: "",
+      stderr: `error: unknown option '--nope'\n${USAGE_HINT}\n`,
+    });
+  });
+
   test("a missing option value is a usage error with exit 2", () => {
     const result = run(["--codebase-path"]);
     expect(result.code).toBe(2);
@@ -120,6 +143,14 @@ describe("main with --json", () => {
         stderr: "",
       });
     }
+  });
+
+  test("--version wins over a later usage error and still prints JSON", () => {
+    expect(run(["--version", "--json", "--nope"])).toEqual({
+      code: 0,
+      stdout: '{"ok":true,"warnings":[],"version":"1.2.3"}\n',
+      stderr: "",
+    });
   });
 
   test("--help prints one JSON object with the help text", () => {
@@ -217,7 +248,8 @@ describe("main on a crash", () => {
     });
     const result = run(["--verbose"]);
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("boom");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(`boom\nerror: boom\n${BUG_HINT}\n`);
   });
 });
 

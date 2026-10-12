@@ -13,6 +13,7 @@ export interface MainOptions {
 
 /** The global flags as commander parses them. */
 export interface ParsedFlags {
+  version?: boolean;
   codebasePath?: string;
   json?: boolean;
   interactive?: boolean;
@@ -48,7 +49,16 @@ export function main(options: MainOptions): number {
   try {
     program.parse([...options.argv], { from: "user" });
   } catch (thrown) {
-    if (thrown instanceof CommanderError && thrown.exitCode === EXIT_OK) {
+    // commander still reads the known options when it rejects argv, so `--version` wins, as `.version()` did.
+    if (
+      thrown instanceof CommanderError &&
+      program.opts<ParsedFlags>().version
+    ) {
+      result.report = versionReport(options.version);
+    } else if (
+      thrown instanceof CommanderError &&
+      thrown.exitCode === EXIT_OK
+    ) {
       result.report = {
         data: { help: commanderOutput },
         text: commanderOutput,
@@ -103,14 +113,18 @@ function createProgram(
       outputError: () => {},
     })
     .action(() => {
-      if (program.opts<{ version?: boolean }>().version) {
-        done({ data: { version }, text: `${version}\n` });
+      if (program.opts<ParsedFlags>().version) {
+        done(versionReport(version));
       } else {
         const help = program.helpInformation();
         done({ data: { help }, text: help });
       }
     });
   return program;
+}
+
+function versionReport(version: string): Report {
+  return { data: { version }, text: `${version}\n` };
 }
 
 /** Reads the 4 global flags and computes `interactive` once. */

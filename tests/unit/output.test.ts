@@ -31,16 +31,18 @@ describe("pickModes", () => {
     expect(modes).toEqual({ stdout: "json", stderr: "rich" });
   });
 
-  test("FORCE_COLOR set and not 0 is rich, and wins over NO_COLOR and TERM=dumb", () => {
-    expect(
-      stdoutMode({ FORCE_COLOR: "1", NO_COLOR: "1", TERM: "dumb" }, false),
-    ).toBe("rich");
-    expect(stdoutMode({ FORCE_COLOR: "" }, false)).toBe("rich");
+  test("FORCE_COLOR set to '', 1, 2, 3 or true is rich, and wins over NO_COLOR and TERM=dumb", () => {
+    for (const value of ["", "1", "2", "3", "true"]) {
+      expect(
+        stdoutMode({ FORCE_COLOR: value, NO_COLOR: "1", TERM: "dumb" }, false),
+      ).toBe("rich");
+    }
   });
 
-  test("FORCE_COLOR=0 does not force rich", () => {
-    expect(stdoutMode({ FORCE_COLOR: "0" }, false)).toBe("plain");
-    expect(stdoutMode({ FORCE_COLOR: "0" }, true)).toBe("rich");
+  test("FORCE_COLOR set to any other value is plain, even on a TTY, the same as Node", () => {
+    for (const value of ["0", "false", "yes"]) {
+      expect(stdoutMode({ FORCE_COLOR: value }, true)).toBe("plain");
+    }
   });
 
   test("NO_COLOR set and not empty is plain on a TTY", () => {
@@ -215,6 +217,16 @@ describe("report in text mode", () => {
     const { out, written } = capture("plain");
     out.report({ data: { version: "1.2.3" }, text: "1.2.3\n" });
     expect(written).toEqual({ stdout: "1.2.3\n", stderr: "" });
+  });
+
+  test("prints no text on stdout when the report has an error", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      data: { version: "1.2.3" },
+      text: "1.2.3\n",
+      error: { code: "internal", message: "boom" },
+    });
+    expect(written).toEqual({ stdout: "", stderr: "error: boom\n" });
   });
 
   test("prints an error with its hint on stderr only", () => {

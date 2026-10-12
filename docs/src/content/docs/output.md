@@ -27,7 +27,7 @@ Progress goes to stderr: step lines, per-repo results and warnings. Only the fin
 `xr` picks a mode for stdout and for stderr, one at a time. It uses the first rule that matches:
 
 1. `--json` gives `json` (stdout only).
-2. `FORCE_COLOR` is set and is not `0`: `rich`.
+2. `FORCE_COLOR` is set: `rich` when it is empty, `1`, `2`, `3` or `true`, and `plain` for any other value, such as `0` or `false`.
 3. `NO_COLOR` is set and is not empty: `plain`.
 4. `TERM=dumb`: `plain`.
 5. The stream is a terminal: `rich`.
@@ -75,6 +75,8 @@ On failure:
 
 Read `error.code` to know what failed. Do not read the message or the exit code for this.
 
+`xr` with no command prints the help. `--version` wins over other flags and arguments, and prints the version even next to a bad flag.
+
 `--version` and `--help` follow `--json` too: `xr --json --version` prints `{"ok":true,"warnings":[],"version":"<version>"}`, and `xr --json --help` prints `{"ok":true,"warnings":[],"help":"<text>"}`.
 
 Without `--json`, an error goes to stderr and stdout stays empty.
@@ -86,10 +88,12 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `usage` | A bad flag, an unknown command or a missing option value. |
 | `internal` | A bug in `xr`. Run the command again with `--verbose` and report the output on [GitHub](https://github.com/alexsuprun/crossrepo/issues). |
 
+New commands add new codes. A script must handle a code that it does not know as a failure.
+
 ## Exit codes
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | Any failure. |
+| `1` | Any failure that is not a usage error. |
 | `2` | A usage error. |
