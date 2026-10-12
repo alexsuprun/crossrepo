@@ -31,6 +31,20 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("unknown option '--nope'");
   });
+
+  test("--json --nope prints one JSON error object on stdout and exits 2", () => {
+    const result = spawnSync(command, [bundle, "--json", "--nope"], {
+      encoding: "utf8",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      warnings: [],
+      error: { code: "usage" },
+    });
+  });
 });
 
 test("dist/xr.js starts with the node shebang", () => {
