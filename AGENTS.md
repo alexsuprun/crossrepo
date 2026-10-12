@@ -5,7 +5,8 @@ Instructions for AI agents working on crossrepo. These rules apply as code arriv
 ## Commands
 
 - `bun install`: install dev tools and turn on the pre-commit format check.
-- `bun run validate`: run lint, typecheck, tests and the build, and stop at the first failure. Run it before you finish a change.
+- `bun run validate`: run lint, typecheck, tests and the smoke tests in parallel. Run it before you finish a change. It prints one `name - ok` line for each check and hides their output. A failing check is marked `FAIL`, and its output follows the list. The other checks still run, so one run shows every problem. Flags: `--jobs N`, `--full` (do not cut a long failure), `--list`.
+- `bun run validate:loud`: run the same checks one after another with all output, and stop at the first failure.
 - `bun run lint`: lint and format check with Biome.
 - `bun run format`: fix lint and format issues that Biome can fix.
 - `bun run typecheck`: typecheck `src/` and, separately, `tests/` and `scripts/`.

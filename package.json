@@ -44,7 +44,8 @@
     "test:commands": "bun test tests/commands --pass-with-no-tests",
     "test:smoke": "bun run build && bun --config=bunfig.smoke.toml test ./tests/smoke/*.smoke.ts",
     "build": "bun build src/cli/bin.ts --target node --outfile dist/xr.js --define XR_VERSION=\\\"$npm_package_version\\\"",
-    "validate": "bun run lint && bun run typecheck && bun run test && bun run test:smoke",
+    "validate": "bun scripts/validate.ts",
+    "validate:loud": "bun run lint && bun run typecheck && bun run test && bun run test:smoke",
     "release": "changeset publish",
     "prepublishOnly": "bun run build",
     "prepare": "git config core.hooksPath .githooks"
