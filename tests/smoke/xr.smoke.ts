@@ -11,6 +11,15 @@ const packageJson = JSON.parse(
 
 const runtimes = smokeRuntimes(process.env.XR_SMOKE_RUNTIMES, process.execPath);
 
+/** The test env without color variables, plus `colors`. */
+function envWith(colors: Record<string, string>): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...colors };
+  for (const name of ["FORCE_COLOR", "NO_COLOR"]) {
+    if (!(name in colors)) delete env[name];
+  }
+  return env;
+}
+
 describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
   test("--version prints the package.json version and exits 0", () => {
     const result = spawnSync(command, [bundle, "--version"], {
@@ -30,6 +39,38 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     expect(result.status).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("unknown option '--nope'");
+  });
+
+  test("FORCE_COLOR=1 styles the error on a piped stderr", () => {
+    const result = spawnSync(command, [bundle, "--nope"], {
+      encoding: "utf8",
+      env: envWith({ FORCE_COLOR: "1" }),
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("\u001b[");
+  });
+
+  test("NO_COLOR=1 keeps the error plain", () => {
+    const result = spawnSync(command, [bundle, "--nope"], {
+      encoding: "utf8",
+      env: envWith({ NO_COLOR: "1" }),
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).not.toContain("\u001b[");
+  });
+
+  test("--json --nope prints one JSON error object on stdout and exits 2", () => {
+    const result = spawnSync(command, [bundle, "--json", "--nope"], {
+      encoding: "utf8",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      warnings: [],
+      error: { code: "usage" },
+    });
   });
 });
 
