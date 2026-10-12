@@ -11,7 +11,10 @@ export default defineConfig({
 		starlight({
 			title: 'crossrepo',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/alexsuprun/crossrepo' }],
-			sidebar: [{ label: 'Install', slug: 'install' }],
+			sidebar: [
+				{ label: 'Install', slug: 'install' },
+				{ label: 'Output and errors', slug: 'output' },
+			],
 			plugins: [starlightLlmsTxt()],
 		}),
 	],
