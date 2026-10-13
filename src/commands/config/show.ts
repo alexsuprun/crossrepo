@@ -4,7 +4,7 @@ import type { FieldItem } from "../../domain/report.ts";
 /** `xr config show`: every merged value with the file that gives it (D25, D42). */
 export const configShow: CommandUnit = {
   accepts: ["codebase", "project"],
-  run({ config }) {
+  async run({ config }) {
     return {
       blocks: [
         { type: "fields", key: "entries", items: config.entries.map(toItem) },

@@ -18,6 +18,8 @@ export interface FieldItem {
 export type Block =
   | { type: "value"; key: string; value: Text }
   | { type: "fields"; key: string; items: FieldItem[] }
+  /** Rows of records. Each record has the same keys, which are the JSON field names. */
+  | { type: "table"; key: string; items: Record<string, Text>[] }
   | {
       type: "repos";
       items: { repo: string; status: RepoStatus; message?: Text }[];

@@ -30,7 +30,7 @@ export interface UnknownKey {
 }
 
 export interface LoadedConfig {
-  codebase: string;
+  codebase?: string;
   values: ConfigValues;
   entries: ConfigEntry[];
   projectsDir: { value: string; source: ConfigSource; resolved: string };
@@ -39,7 +39,8 @@ export interface LoadedConfig {
 
 export interface LoadConfigOptions {
   home: string;
-  codebase: string;
+  /** Without it, only the user level loads. */
+  codebase?: string;
 }
 
 type Tree = { [key: string]: Tree | string | string[] };
@@ -54,8 +55,12 @@ export function loadConfig({
 }: LoadConfigOptions): LoadedConfig {
   const levels = [
     join(home, ".crossrepo", "config"),
-    join(codebase, ".crossrepo", "config"),
-    join(codebase, ".crossrepo", "config.local"),
+    ...(codebase === undefined
+      ? []
+      : [
+          join(codebase, ".crossrepo", "config"),
+          join(codebase, ".crossrepo", "config.local"),
+        ]),
   ];
   let merged: Tree = {};
   const sources = new Map<string, string>();
@@ -205,15 +210,19 @@ function sourceOf(sources: Map<string, string>, key: string): ConfigSource {
   return path === undefined ? { kind: "default" } : { kind: "file", path };
 }
 
-/** Relative is relative to the codebase, a leading `~` is `home`, nothing else is expanded. */
+/**
+ * Relative is relative to the codebase, a leading `~` is `home`, nothing else is
+ * expanded. With no codebase, a relative path stays as written.
+ */
 function resolveProjectsDir(
   value: string,
-  codebase: string,
+  codebase: string | undefined,
   home: string,
 ): string {
   if (value === "~") return home;
   if (value.startsWith("~/") || value.startsWith(`~${sep}`)) {
     return join(home, value.slice(2));
   }
-  return isAbsolute(value) ? value : resolve(codebase, value);
+  if (isAbsolute(value) || codebase === undefined) return value;
+  return resolve(codebase, value);
 }

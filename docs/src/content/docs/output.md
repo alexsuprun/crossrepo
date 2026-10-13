@@ -71,6 +71,7 @@ On failure:
 - `ok` is `true` on success and `false` on failure.
 - `warnings` is always there. Each warning is `{ "code", "message", "hint"? }`. Each warning also goes to stderr when it happens.
 - `error` is there only on failure. It has `code` and `message`, and `hint` and `details` only when the error has them.
+- `notes` is there only when the command has notes for you, such as a hint for the next step. It is a list of strings.
 - The other fields belong to the command. On failure they can be there too, next to `error`.
 
 Read `error.code` to know what failed. Do not read the message or the exit code for this.
@@ -91,6 +92,11 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `config-conflict` | One config level has both a `.yaml` and a `.yml` file. |
 | `invalid-config` | A config file is not valid YAML, or a value has the wrong type. |
 | `file-busy` | `xr` could not write a file because another program is using it (Windows only). Close that program and run the command again. |
+| `git-too-old` | git is older than 2.27. Upgrade git. |
+| `git-failed` | A git command failed. The message names the command and the first line git printed. |
+| `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`. `error.details.repos` lists each repo with the command that fixes it. |
+| `already-a-codebase` | `xr codebase init` ran in a folder that is a codebase already, or that has a `.crossrepo/` folder. |
+| `inside-a-project` | `xr codebase init` ran in a project folder. |
 
 Warning codes, in `warnings`:
 

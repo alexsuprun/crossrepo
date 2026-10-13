@@ -159,6 +159,18 @@ describe("loadConfig levels", () => {
   });
 });
 
+describe("with no codebase", () => {
+  test("reads only the user level and keeps a relative projects-dir as written", () => {
+    writeFile(userFile, "name: me\nprojects-dir: work\n");
+    writeFile(codebaseFile, "name: [\n");
+    writeFile(localFile, "name: [\n");
+    const config = loadConfig({ home: iso.home });
+    expect(config.codebase).toBeUndefined();
+    expect(entry(config, "name")?.value).toBe("me");
+    expect(config.projectsDir.resolved).toBe("work");
+  });
+});
+
 describe("projects-dir", () => {
   test("is .projects with the source default when no level sets it", () => {
     const config = load();

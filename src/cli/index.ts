@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 import { Command, CommanderError } from "commander";
 import { createFs } from "../adapters/fs/index.ts";
+import { createGit } from "../adapters/git/index.ts";
+import { codebaseInit } from "../commands/codebase/init.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
   CODEBASE_PATH_HINT,
@@ -16,6 +18,7 @@ import {
   XrError,
 } from "../errors/index.ts";
 import {
+  type Block,
   createOutput,
   type Output,
   pickModes,
@@ -67,7 +70,7 @@ interface Parsed {
 }
 
 /** Runs the `xr` CLI on `argv` (without the node and script paths) and returns the exit code. */
-export function main(options: MainOptions): number {
+export async function main(options: MainOptions): Promise<number> {
   let commanderOutput = "";
   const parsed: Parsed = {};
   const program = createProgram({
@@ -105,7 +108,7 @@ export function main(options: MainOptions): number {
   }
 
   const flags = readGlobalFlags(program.opts<ParsedFlags>(), options.isTTY);
-  let discovery: FoundCodebase | undefined;
+  let discovery: Discovery | undefined;
   if (!failure && parsed.command) {
     try {
       discovery = checkKind(
@@ -126,13 +129,14 @@ export function main(options: MainOptions): number {
     stdout: options.stdout,
     stderr: options.stderr,
     home: options.home,
-    codebase: discovery?.codebase,
+    // A folder that is not a codebase yet shows its paths relative to `~`.
+    codebase: discovery?.kind === "none" ? undefined : discovery?.codebase,
   });
   if (!failure) {
     try {
       const report =
         parsed.command && discovery
-          ? runCommand(parsed.command, discovery, flags, options.home, out)
+          ? await runCommand(parsed.command, discovery, flags, options, out)
           : (parsed.report ?? { blocks: [] });
       out.report(report);
       return EXIT_OK;
@@ -143,20 +147,33 @@ export function main(options: MainOptions): number {
   if (flags.verbose && failure.error.code === "internal") {
     out.trace(stackOf(failure.thrown));
   }
-  const { code, message, hint } = failure.error;
-  out.report({ blocks: [], error: { code, message, hint } });
+  const { code, message, hint, blocks } = failure.error;
+  out.report({
+    blocks: [],
+    error: {
+      code,
+      message,
+      hint: hint ?? (code === "internal" ? BUG_HINT : undefined),
+      // `errors` types its blocks loosely, since it may not import the Report types.
+      blocks: blocks as Block[] | undefined,
+    },
+  });
   return exitCodeFor(failure.error);
 }
 
 /** Loads the config once, emits one warning per unknown key, builds `ctx` and runs the command. */
-function runCommand(
+async function runCommand(
   command: CommandUnit,
-  discovery: FoundCodebase,
+  discovery: Discovery,
   flags: GlobalFlags,
-  home: string,
+  { home, env }: MainOptions,
   out: Output,
-): Report {
-  const config = loadConfig({ home, codebase: discovery.codebase });
+): Promise<Report> {
+  // A folder that is not a codebase has no codebase levels, so only the user level loads.
+  const config = loadConfig({
+    home,
+    codebase: discovery.kind === "none" ? undefined : discovery.codebase,
+  });
   for (const unknown of config.unknownKeys) {
     out.emit({
       type: "warning",
@@ -170,6 +187,7 @@ function runCommand(
   const ctx: Ctx = {
     out: { emit: (event) => out.emit(event) },
     fs: createFs(),
+    git: createGit({ interactive: flags.interactive, env }),
     config,
     discovery,
     interactive: flags.interactive,
@@ -177,16 +195,15 @@ function runCommand(
   return command.run(ctx);
 }
 
-type FoundCodebase = Exclude<Discovery, { kind: "none" }>;
-
 /**
- * `cli` checks the folder kind, so commands never do (AD-9). No command accepts
- * `none` yet, and the config load needs a codebase.
+ * `cli` checks the folder kind, so commands never do (AD-9). A command may give
+ * its own error for a kind it refuses; the default is `not-a-codebase`.
  */
-function checkKind(command: CommandUnit, discovery: Discovery): FoundCodebase {
-  if (discovery.kind !== "none" && command.accepts.includes(discovery.kind)) {
+function checkKind(command: CommandUnit, discovery: Discovery): Discovery {
+  if (command.accepts.includes(discovery.kind)) {
     return discovery;
   }
+  if (command.refuse) throw command.refuse(discovery, createFs());
   throw new XrError({
     code: "not-a-codebase",
     message:
@@ -233,6 +250,17 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .description("print the merged config and the file that gives each value")
     .helpOption("-h, --help", "print this help")
     .action(() => select(configShow));
+
+  const codebase: Command = program
+    .command("codebase")
+    .description("set up and change the codebase")
+    .helpOption("-h, --help", "print this help")
+    .action(() => help(codebase.helpInformation()));
+  codebase
+    .command("init")
+    .description("make this folder a codebase of the git repos in it")
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseInit));
   return program;
 }
 
