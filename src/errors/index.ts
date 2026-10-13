@@ -12,6 +12,9 @@ export const ERROR_CODES = [
   "repos-not-ready",
   "already-a-codebase",
   "inside-a-project",
+  "lock-held",
+  "interrupted",
+  "stale-lock",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -108,7 +111,9 @@ export function withBlocks(
   return error;
 }
 
-/** Maps an error to the process exit code: `usage` is 2, every other code is 1. */
+/** Maps an error to the process exit code: `usage` is 2, `interrupted` is 130, every other code is 1. */
 export function exitCodeFor(error: XrError): number {
-  return error.code === "usage" ? EXIT_USAGE : EXIT_FAILURE;
+  if (error.code === "usage") return EXIT_USAGE;
+  if (error.code === "interrupted") return EXIT_INTERRUPTED;
+  return EXIT_FAILURE;
 }

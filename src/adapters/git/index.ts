@@ -1,14 +1,22 @@
 import { execFile } from "node:child_process";
 import { GitError, XrError } from "../../errors/index.ts";
 
+/** Options of every git call. An aborted `signal` stops git: `GitError` with `exitCode: null`. */
+export interface GitCallOptions {
+  signal?: AbortSignal;
+}
+
 /** Named git calls, as `ctx.git`. There is no generic `run`, `commit` or `add`. */
 export interface Git {
   /** The version from `git version`, such as `2.45.1` or `2.45.1.windows.1`. */
   version(): Promise<string>;
   /** The raw `remote.origin.url` of the repo at `dir` (no `insteadOf`), or `undefined`. */
-  originUrl(dir: string): Promise<string | undefined>;
+  originUrl(dir: string, options?: GitCallOptions): Promise<string | undefined>;
   /** The branch `origin/HEAD` points to, without `origin/`, or `undefined` when it is not set. */
-  originHead(dir: string): Promise<string | undefined>;
+  originHead(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<string | undefined>;
 }
 
 export interface CreateGitOptions {
@@ -32,12 +40,15 @@ interface Result {
 export function createGit({ interactive, env }: CreateGitOptions): Git {
   const gitEnv = buildEnv(env, interactive);
 
-  async function exec(args: readonly string[]): Promise<Result> {
+  async function exec(
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Result> {
     return new Promise((resolve, reject) => {
       execFile(
         "git",
         args,
-        { env: gitEnv, encoding: "utf8", windowsHide: true },
+        { env: gitEnv, encoding: "utf8", windowsHide: true, signal },
         (error, stdout, stderr) => {
           if (!error) {
             resolve({ exitCode: 0, stdout, stderr });
@@ -64,6 +75,7 @@ export function createGit({ interactive, env }: CreateGitOptions): Git {
   }
 
   let checked: Promise<string> | undefined;
+  // Shared by every call, so it never takes one caller's signal.
   function checkVersion(): Promise<string> {
     checked ??= exec(["version"]).then(({ exitCode, stdout, stderr }) => {
       if (exitCode !== 0)
@@ -74,9 +86,12 @@ export function createGit({ interactive, env }: CreateGitOptions): Git {
   }
 
   /** Runs git after the version check. Exit 1 or empty output gives `undefined`. */
-  async function read(args: readonly string[]): Promise<string | undefined> {
+  async function read(
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
     await checkVersion();
-    const { exitCode, stdout, stderr } = await exec(args);
+    const { exitCode, stdout, stderr } = await exec(args, signal);
     if (exitCode === 0) return stdout.replace(/\r?\n$/, "") || undefined;
     if (exitCode === 1) return undefined;
     throw new GitError({ args, exitCode, stderr });
@@ -84,20 +99,26 @@ export function createGit({ interactive, env }: CreateGitOptions): Git {
 
   return {
     version: checkVersion,
-    async originUrl(dir) {
+    async originUrl(dir, options) {
       // Exit 1: the key is not set.
-      return read(["-C", dir, "config", "--get", "remote.origin.url"]);
+      return read(
+        ["-C", dir, "config", "--get", "remote.origin.url"],
+        options?.signal,
+      );
     },
-    async originHead(dir) {
+    async originHead(dir, options) {
       // Exit 1 with --quiet: the ref is missing or not symbolic.
-      const head = await read([
-        "-C",
-        dir,
-        "symbolic-ref",
-        "--quiet",
-        "--short",
-        "refs/remotes/origin/HEAD",
-      ]);
+      const head = await read(
+        [
+          "-C",
+          dir,
+          "symbolic-ref",
+          "--quiet",
+          "--short",
+          "refs/remotes/origin/HEAD",
+        ],
+        options?.signal,
+      );
       return head?.replace(/^(remotes\/)?origin\//, "");
     },
   };

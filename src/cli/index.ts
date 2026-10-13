@@ -1,7 +1,8 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { Command, CommanderError } from "commander";
 import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
+import { createLock } from "../adapters/lock/index.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
@@ -34,9 +35,16 @@ export interface MainOptions {
   cwd: string;
   /** `os.homedir()`: the user config level and `~` in paths. */
   home: string;
+  /** Ctrl-C. `bin.ts` wires it to `SIGINT`; tests fire it in-process. Default: never fires. */
+  interrupts?: Interrupts;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
 }
+
+/** A Ctrl-C source, as `ctx.interrupts`. */
+export type Interrupts = Ctx["interrupts"];
+
+const NO_INTERRUPTS: Interrupts = { on: () => () => {} };
 
 /** The global flags as commander parses them. */
 export interface ParsedFlags {
@@ -166,7 +174,7 @@ async function runCommand(
   command: CommandUnit,
   discovery: Discovery,
   flags: GlobalFlags,
-  { home, env }: MainOptions,
+  { home, env, interrupts = NO_INTERRUPTS }: MainOptions,
   out: Output,
 ): Promise<Report> {
   // A folder that is not a codebase has no codebase levels, so only the user level loads.
@@ -191,8 +199,24 @@ async function runCommand(
     config,
     discovery,
     interactive: flags.interactive,
+    lock: { path: lockPath(discovery), adapter: createLock() },
+    interrupts,
+    stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
   };
   return command.run(ctx);
+}
+
+/** `<codebase>/.crossrepo/xr.lock`; a folder that is not a codebase yet uses its own `.crossrepo/`. */
+function lockPath(discovery: Discovery): string {
+  const codebase =
+    discovery.kind === "none" ? discovery.dir : discovery.codebase;
+  return join(codebase, ".crossrepo", "xr.lock");
+}
+
+/** `XR_TEST_STEP_DELAY_MS`, for the smoke test of Ctrl-C. Anything but a positive number is no delay. */
+function stepDelay(value: string | undefined): number | undefined {
+  const ms = Number(value);
+  return value && Number.isFinite(ms) && ms > 0 ? ms : undefined;
 }
 
 /**

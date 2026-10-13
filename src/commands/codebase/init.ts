@@ -40,7 +40,12 @@ export const codebaseInit: CommandUnit = {
       });
     }
     const repos = await checkRepos(ctx, dir);
-    await transaction(ctx, (tx) => writeCodebaseFiles(ctx, tx, dir, repos));
+    await transaction(
+      ctx,
+      (tx) => writeCodebaseFiles(ctx, tx, dir, repos),
+      // The lock lives in `.crossrepo/`, which the first step makes.
+      { lock: "after-first-step" },
+    );
     return {
       blocks: [
         { type: "value", key: "codebase", value: { path: dir } },

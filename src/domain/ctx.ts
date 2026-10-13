@@ -42,13 +42,27 @@ export interface CtxFs {
   exists(path: string): boolean;
 }
 
+/** Options of every git call. An aborted `signal` stops git. */
+export interface GitCallOptions {
+  signal?: AbortSignal;
+}
+
 /** Named git calls. The first call checks that git is 2.27 or newer (`git-too-old`). */
 export interface CtxGit {
   version(): Promise<string>;
   /** The raw `origin` URL, or `undefined` when the repo has no `origin`. */
-  originUrl(dir: string): Promise<string | undefined>;
+  originUrl(dir: string, options?: GitCallOptions): Promise<string | undefined>;
   /** The branch `origin/HEAD` points to, without `origin/`, or `undefined`. */
-  originHead(dir: string): Promise<string | undefined>;
+  originHead(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<string | undefined>;
+}
+
+/** The PID lock adapter. Only the runners take it. */
+export interface CtxLock {
+  /** Throws `lock-held` when another running process holds it. */
+  acquire(path: string): { release(): void; stalePid?: number };
 }
 
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
@@ -60,6 +74,12 @@ export interface Ctx {
   discovery: Discovery;
   /** stdin and stdout are a TTY, and neither `--json` nor `--no-interactive` is given. */
   interactive: boolean;
+  /** `path` is `<codebase>/.crossrepo/xr.lock`, resolved by `cli` (AD-7). */
+  lock: { path: string; adapter: CtxLock };
+  /** Ctrl-C. Only the runners listen; `on` gives the function that stops listening. */
+  interrupts: { on(handler: () => void): () => void };
+  /** Test only (`XR_TEST_STEP_DELAY_MS`): the runner waits this long after each step. */
+  stepDelayMs?: number;
 }
 
 /** What a failed undo leaves behind, and the command that removes it by hand. */
@@ -73,8 +93,13 @@ export interface Leftover {
 export interface Tx {
   step<T>(
     label: string,
-    run: () => T | Promise<T>,
+    run: (signal: AbortSignal) => T | Promise<T>,
     undo: (result: T) => void | Promise<void>,
+    manualCleanup: Leftover,
+  ): Promise<T>;
+  final<T>(
+    label: string,
+    run: () => T | Promise<T>,
     manualCleanup: Leftover,
   ): Promise<T>;
 }

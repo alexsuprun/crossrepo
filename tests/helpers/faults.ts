@@ -22,3 +22,29 @@ export function withFault<T extends object, K extends keyof T>(
     },
   };
 }
+
+/**
+ * Gives a copy of `adapter` that calls `hook` right after the real `method`
+ * returns on its `nth` call (1-based), for example to fire a Ctrl-C.
+ */
+export function afterCall<T extends object, K extends keyof T>(
+  adapter: T,
+  method: K,
+  nth: number,
+  hook: () => void,
+): T {
+  const real = adapter[method];
+  if (typeof real !== "function") {
+    throw new Error(`${String(method)} is not a method`);
+  }
+  let calls = 0;
+  return {
+    ...adapter,
+    [method]: (...args: unknown[]) => {
+      const result = real.apply(adapter, args);
+      calls += 1;
+      if (calls === nth) hook();
+      return result;
+    },
+  };
+}
