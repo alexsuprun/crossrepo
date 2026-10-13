@@ -23,12 +23,13 @@ describe("ERROR_CODES", () => {
     expect(ERROR_CODES).toContain("internal");
   });
 
-  test("holds the config and discovery codes, each with exit 1", () => {
+  test("holds the config, discovery and file codes, each with exit 1", () => {
     for (const code of [
       "not-a-codebase",
       "unknown-config-key",
       "config-conflict",
       "invalid-config",
+      "file-busy",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);

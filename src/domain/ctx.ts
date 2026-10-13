@@ -29,6 +29,11 @@ export interface ConfigView {
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
 export interface Ctx {
   out: { emit(event: LiveEvent): void };
+  /** Text file I/O. `readText` gives `undefined` for a missing file; `writeText` is atomic. */
+  fs: {
+    readText(path: string): string | undefined;
+    writeText(path: string, text: string): void;
+  };
   config: ConfigView;
   discovery: Discovery;
   /** stdin and stdout are a TTY, and neither `--json` nor `--no-interactive` is given. */

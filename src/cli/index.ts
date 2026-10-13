@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { Command, CommanderError } from "commander";
+import { createFs } from "../adapters/fs/index.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
   CODEBASE_PATH_HINT,
@@ -168,6 +169,7 @@ function runCommand(
   }
   const ctx: Ctx = {
     out: { emit: (event) => out.emit(event) },
+    fs: createFs(),
     config,
     discovery,
     interactive: flags.interactive,
