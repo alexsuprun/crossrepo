@@ -66,6 +66,8 @@ export interface FieldItem {
 export type Block =
   | { type: "value"; key: string; value: Text }
   | { type: "fields"; key: string; items: FieldItem[] }
+  /** Rows of records. Each record has the same keys, which are the JSON field names. */
+  | { type: "table"; key: string; items: Record<string, Text>[] }
   | {
       type: "repos";
       items: { repo: string; status: RepoStatus; message?: Text }[];
@@ -137,7 +139,7 @@ const TONE_FORMAT = {
   muted: "dim",
 } as const;
 
-const RESERVED_KEYS = new Set(["ok", "warnings", "error"]);
+const RESERVED_KEYS = new Set(["ok", "warnings", "error", "notes"]);
 
 /** Creates the one writer of `xr` output. Warnings are kept for the JSON Report. */
 export function createOutput({
@@ -218,7 +220,11 @@ function blocksData(
   topLevel: boolean,
 ): Record<string, unknown> {
   const data: Record<string, unknown> = {};
+  const notes = blocks.flatMap((block) =>
+    block.type === "note" ? [jsonText(block.text)] : [],
+  );
   for (const block of blocks) {
+    if (block.type === "note") continue;
     const [key, value] = blockData(block);
     if (topLevel && RESERVED_KEYS.has(key)) {
       throw new Error(`The Report uses the reserved key "${key}".`);
@@ -227,6 +233,12 @@ function blocksData(
       throw new Error(`The Report has the key "${key}" twice.`);
     }
     data[key] = value;
+  }
+  if (notes.length) {
+    if (Object.hasOwn(data, "notes")) {
+      throw new Error('The Report has the key "notes" twice.');
+    }
+    data.notes = notes;
   }
   return data;
 }
@@ -243,6 +255,17 @@ function blockData(block: Block): [string, unknown] {
           value: Array.isArray(value) ? value.map(jsonText) : jsonText(value),
           ...(source === undefined ? {} : { source: jsonText(source) }),
           ...mapValues(extra ?? {}, jsonText),
+        })),
+      ];
+    case "table":
+      return [block.key, block.items.map((item) => mapValues(item, jsonText))];
+    case "leftovers":
+      return [
+        "leftovers",
+        block.items.map(({ what, path, command }) => ({
+          what,
+          path: jsonText(path),
+          command: jsonText(command),
         })),
       ];
     default:
@@ -298,6 +321,7 @@ function renderBlocks(
   show: (text: Text) => string,
 ): string {
   return blocks
+    .filter((block) => block.type !== "table" || block.items.length > 0)
     .map((block) => `${renderBlock(block, paint, show)}\n`)
     .join("\n");
 }
@@ -312,6 +336,17 @@ function renderBlock(
       return show(block.value).replace(/\n$/, "");
     case "fields":
       return renderFields(block.items, paint, show);
+    case "table":
+      return renderTable(block.items, show);
+    case "note":
+      return paint(block.tone, show(block.text));
+    case "leftovers":
+      return block.items
+        .map(
+          ({ what, path, command }) =>
+            `${what}: ${show(path)}\n${paint("muted", `  ${show(command)}`)}`,
+        )
+        .join("\n");
     default:
       return noRenderer(block);
   }
@@ -347,6 +382,28 @@ function renderFields(
       if (!Array.isArray(value)) return first;
       return [first, ...value.map((item) => `  ${show(item)}`)].join("\n");
     })
+    .join("\n");
+}
+
+/** One row per record, columns padded to the widest cell; the last column is not padded. */
+function renderTable(
+  items: readonly Record<string, Text>[],
+  show: (text: Text) => string,
+): string {
+  const rows = items.map((item) => Object.values(item).map(show));
+  const widths = rows.reduce<number[]>(
+    (max, row) =>
+      row.map((cell, index) => Math.max(max[index] ?? 0, cell.length)),
+    [],
+  );
+  return rows
+    .map((row) =>
+      row
+        .map((cell, index) =>
+          index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0),
+        )
+        .join("  "),
+    )
     .join("\n");
 }
 

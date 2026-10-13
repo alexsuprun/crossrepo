@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeRepos } from "../helpers/git.ts";
 import { isolate, writeFile } from "../helpers/isolate.ts";
 import { smokeRuntimes } from "../helpers/smoke-runtimes.ts";
 
@@ -95,6 +96,43 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
           },
         ],
       });
+    } finally {
+      iso.restore();
+    }
+  });
+
+  test("codebase init --json makes a codebase of two repos", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(codebase, { web: {}, api: {} });
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "init", "--json"],
+        {
+          encoding: "utf8",
+          cwd: codebase,
+          // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+          env: { ...process.env },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        codebase,
+        added: [
+          { repo: "api", remote: remotes.api, defaultBranch: "main" },
+          { repo: "web", remote: remotes.web, defaultBranch: "main" },
+        ],
+      });
+      expect(
+        readFileSync(join(codebase, ".crossrepo", "config.yaml"), "utf8"),
+      ).toContain("repos:\n  api:\n");
+      expect(readFileSync(join(codebase, "AGENTS.md"), "utf8")).toContain(
+        "## Codebase",
+      );
     } finally {
       iso.restore();
     }

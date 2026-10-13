@@ -5,7 +5,7 @@ import { main } from "./index.ts";
 /** Replaced at build time by `bun build --define`. */
 declare const XR_VERSION: string;
 
-process.exitCode = main({
+main({
   version: XR_VERSION,
   argv: process.argv.slice(2),
   env: process.env,
@@ -18,4 +18,6 @@ process.exitCode = main({
   home: homedir(),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
+}).then((code) => {
+  process.exitCode = code;
 });

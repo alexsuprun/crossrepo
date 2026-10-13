@@ -9,10 +9,10 @@ interface RunOptions {
   isTTY?: { stdin: boolean; stdout: boolean; stderr: boolean };
 }
 
-function run(argv: string[], options: RunOptions = {}) {
+async function run(argv: string[], options: RunOptions = {}) {
   let stdout = "";
   let stderr = "";
-  const code = main({
+  const code = await main({
     version: "1.2.3",
     argv,
     env: options.env ?? {},
@@ -34,15 +34,30 @@ const BUG_HINT =
   "This is a bug in xr. Run it again with `--verbose` and report the output at https://github.com/alexsuprun/crossrepo/issues.";
 
 describe("main", () => {
-  test("--version prints only the version on stdout and exits 0", () => {
-    expect(run(["--version"])).toEqual({
+  test("is async, so a command can wait for git", async () => {
+    const pending = main({
+      version: "1.2.3",
+      argv: ["--version"],
+      env: {},
+      isTTY: { stdin: false, stdout: false, stderr: false },
+      cwd: "/nowhere",
+      home: "/home/me",
+      stdout: () => {},
+      stderr: () => {},
+    });
+    expect(pending).toBeInstanceOf(Promise);
+    expect(await pending).toBe(0);
+  });
+
+  test("--version prints only the version on stdout and exits 0", async () => {
+    expect(await run(["--version"])).toEqual({
       code: 0,
       stdout: "1.2.3\n",
       stderr: "",
     });
   });
 
-  test("--version wins over a usage error or --help, as commander .version() did", () => {
+  test("--version wins over a usage error or --help, as commander .version() did", async () => {
     for (const argv of [
       ["--version", "--nope"],
       ["--nope", "--version"],
@@ -51,12 +66,16 @@ describe("main", () => {
       ["--version", "--help"],
       ["--help", "--version"],
     ]) {
-      expect(run(argv)).toEqual({ code: 0, stdout: "1.2.3\n", stderr: "" });
+      expect(await run(argv)).toEqual({
+        code: 0,
+        stdout: "1.2.3\n",
+        stderr: "",
+      });
     }
   });
 
-  test("--help prints usage with the 4 global flags on stdout and exits 0", () => {
-    const result = run(["--help"]);
+  test("--help prints usage with the 4 global flags on stdout and exits 0", async () => {
+    const result = await run(["--help"]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: xr");
@@ -66,15 +85,15 @@ describe("main", () => {
     expect(result.stdout).toContain("--verbose");
   });
 
-  test("no arguments prints usage on stdout and exits 0", () => {
-    const result = run([]);
+  test("no arguments prints usage on stdout and exits 0", async () => {
+    const result = await run([]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: xr");
   });
 
-  test("the 4 global flags are accepted", () => {
-    const result = run([
+  test("the 4 global flags are accepted", async () => {
+    const result = await run([
       "--codebase-path",
       "/tmp/x",
       "--no-interactive",
@@ -84,32 +103,32 @@ describe("main", () => {
     expect(result.stderr).toBe("");
   });
 
-  test("--help lists the config command", () => {
-    expect(run(["--help"]).stdout).toContain("config");
+  test("--help lists the config command", async () => {
+    expect((await run(["--help"])).stdout).toContain("config");
   });
 
-  test("config with no subcommand prints its help and exits 0", () => {
-    const result = run(["config"]);
+  test("config with no subcommand prints its help and exits 0", async () => {
+    const result = await run(["config"]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: xr config");
     expect(result.stdout).toContain("show");
   });
 
-  test("an unknown subcommand or argument is a usage error", () => {
+  test("an unknown subcommand or argument is a usage error", async () => {
     for (const argv of [
       ["config", "nope"],
       ["config", "show", "x"],
     ]) {
-      const result = run(argv);
+      const result = await run(argv);
       expect(result.code).toBe(2);
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain(USAGE_HINT);
     }
   });
 
-  test("unknown option prints an error on stderr only and exits 2", () => {
-    const result = run(["--nope"]);
+  test("unknown option prints an error on stderr only and exits 2", async () => {
+    const result = await run(["--nope"]);
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(
@@ -117,38 +136,38 @@ describe("main", () => {
     );
   });
 
-  test("an unexpected argument is a usage error with exit 2", () => {
-    const result = run(["extra"]);
+  test("an unexpected argument is a usage error with exit 2", async () => {
+    const result = await run(["extra"]);
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(USAGE_HINT);
   });
 
-  test("--verbose prints no stack trace for a usage error", () => {
-    expect(run(["--verbose", "--nope"])).toEqual({
+  test("--verbose prints no stack trace for a usage error", async () => {
+    expect(await run(["--verbose", "--nope"])).toEqual({
       code: 2,
       stdout: "",
       stderr: `error: unknown option '--nope'\n${USAGE_HINT}\n`,
     });
   });
 
-  test("a missing option value is a usage error with exit 2", () => {
-    const result = run(["--codebase-path"]);
+  test("a missing option value is a usage error with exit 2", async () => {
+    const result = await run(["--codebase-path"]);
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(USAGE_HINT);
   });
 
-  test("a TTY stderr gets the error in rich mode", () => {
-    const result = run(["--nope"], {
+  test("a TTY stderr gets the error in rich mode", async () => {
+    const result = await run(["--nope"], {
       isTTY: { stdin: true, stdout: false, stderr: true },
     });
     expect(result.stderr).toContain("\u001b[");
     expect(result.stdout).toBe("");
   });
 
-  test("NO_COLOR keeps a TTY stderr plain", () => {
-    const result = run(["--nope"], {
+  test("NO_COLOR keeps a TTY stderr plain", async () => {
+    const result = await run(["--nope"], {
       env: { NO_COLOR: "1" },
       isTTY: { stdin: true, stdout: true, stderr: true },
     });
@@ -159,12 +178,12 @@ describe("main", () => {
 });
 
 describe("main with --json", () => {
-  test("--version prints one JSON object with the version", () => {
+  test("--version prints one JSON object with the version", async () => {
     for (const argv of [
       ["--json", "--version"],
       ["--version", "--json"],
     ]) {
-      expect(run(argv)).toEqual({
+      expect(await run(argv)).toEqual({
         code: 0,
         stdout: '{"ok":true,"warnings":[],"version":"1.2.3"}\n',
         stderr: "",
@@ -172,21 +191,21 @@ describe("main with --json", () => {
     }
   });
 
-  test("--version wins over a later usage error and still prints JSON", () => {
-    expect(run(["--version", "--json", "--nope"])).toEqual({
+  test("--version wins over a later usage error and still prints JSON", async () => {
+    expect(await run(["--version", "--json", "--nope"])).toEqual({
       code: 0,
       stdout: '{"ok":true,"warnings":[],"version":"1.2.3"}\n',
       stderr: "",
     });
   });
 
-  test("--help prints one JSON object with the help text", () => {
+  test("--help prints one JSON object with the help text", async () => {
     for (const argv of [
       ["--json", "--help"],
       ["--help", "--json"],
       ["--json"],
     ]) {
-      const result = run(argv);
+      const result = await run(argv);
       expect(result.code).toBe(0);
       expect(result.stderr).toBe("");
       const envelope = JSON.parse(result.stdout);
@@ -194,18 +213,18 @@ describe("main with --json", () => {
       expect(envelope.ok).toBe(true);
       expect(envelope.warnings).toEqual([]);
       expect(envelope.help).toContain("Usage: xr");
-      expect(envelope.help).toBe(run(["--help"]).stdout);
+      expect(envelope.help).toBe((await run(["--help"])).stdout);
     }
   });
 
-  test("a usage error is one JSON object on stdout and exits 2", () => {
+  test("a usage error is one JSON object on stdout and exits 2", async () => {
     for (const argv of [
       ["--json", "--nope"],
       ["--nope", "--json"],
       ["--json", "extra"],
       ["--json", "--codebase-path"],
     ]) {
-      const result = run(argv);
+      const result = await run(argv);
       expect(result.code).toBe(2);
       expect(result.stderr).toBe("");
       const envelope = JSON.parse(result.stdout);
@@ -218,8 +237,8 @@ describe("main with --json", () => {
     }
   });
 
-  test("stdout is JSON even when stdout is a TTY with FORCE_COLOR", () => {
-    const result = run(["--json", "--version"], {
+  test("stdout is JSON even when stdout is a TTY with FORCE_COLOR", async () => {
+    const result = await run(["--json", "--version"], {
       env: { FORCE_COLOR: "1" },
       isTTY: { stdin: true, stdout: true, stderr: true },
     });
@@ -245,9 +264,9 @@ describe("main on a crash", () => {
     return error;
   }
 
-  test("exits 1 with code internal and a hint to report a bug with --verbose", () => {
+  test("exits 1 with code internal and a hint to report a bug with --verbose", async () => {
     crash();
-    const result = run([]);
+    const result = await run([]);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toStartWith("error: boom\n");
@@ -255,10 +274,10 @@ describe("main on a crash", () => {
     expect(result.stderr).toContain("bug");
   });
 
-  test("--verbose adds the stack trace on stderr only", () => {
+  test("--verbose adds the stack trace on stderr only", async () => {
     const error = crash();
-    const quiet = run(["--json"]);
-    const verbose = run(["--json", "--verbose"]);
+    const quiet = await run(["--json"]);
+    const verbose = await run(["--json", "--verbose"]);
     expect(verbose.code).toBe(1);
     expect(verbose.stdout).toBe(quiet.stdout);
     expect(quiet.stderr).toBe("");
@@ -266,14 +285,14 @@ describe("main on a crash", () => {
     expect(JSON.parse(verbose.stdout).error.code).toBe("internal");
   });
 
-  test("a thrown non-error under --verbose prints it as the trace", () => {
+  test("a thrown non-error under --verbose prints it as the trace", async () => {
     helpInformation = spyOn(
       Command.prototype,
       "helpInformation",
     ).mockImplementation(() => {
       throw "boom";
     });
-    const result = run(["--verbose"]);
+    const result = await run(["--verbose"]);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(`boom\nerror: boom\n${BUG_HINT}\n`);

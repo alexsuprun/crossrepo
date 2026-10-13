@@ -6,6 +6,8 @@ import {
   EXIT_OK,
   EXIT_USAGE,
   exitCodeFor,
+  GitError,
+  withBlocks,
   XrError,
 } from "../../src/errors/index.ts";
 
@@ -30,6 +32,11 @@ describe("ERROR_CODES", () => {
       "config-conflict",
       "invalid-config",
       "file-busy",
+      "git-too-old",
+      "git-failed",
+      "repos-not-ready",
+      "already-a-codebase",
+      "inside-a-project",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);
@@ -60,10 +67,69 @@ describe("XrError", () => {
     expect(error.details).toEqual({ flag: "--nope" });
   });
 
-  test("hint and details are optional", () => {
+  test("hint, details and blocks are optional", () => {
     const error = new XrError({ code: "internal", message: "crash" });
     expect(error.hint).toBeUndefined();
     expect(error.details).toBeUndefined();
+    expect(error.blocks).toBeUndefined();
+  });
+
+  test("carries Report blocks for error.details", () => {
+    const blocks = [{ type: "value", key: "k", value: "v" }];
+    const error = new XrError({ code: "usage", message: "x", blocks });
+    expect(error.blocks).toEqual(blocks);
+  });
+});
+
+describe("GitError", () => {
+  test("is an XrError with code git-failed, the args, the exit code and stderr", () => {
+    const error = new GitError({
+      args: ["-C", "/x", "status"],
+      exitCode: 128,
+      stderr: "fatal: not a git repository\n",
+    });
+    expect(error).toBeInstanceOf(XrError);
+    expect(error.name).toBe("GitError");
+    expect(error.code).toBe("git-failed");
+    expect(error.args).toEqual(["-C", "/x", "status"]);
+    expect(error.exitCode).toBe(128);
+    expect(error.stderr).toBe("fatal: not a git repository\n");
+    expect(error.message).toBe(
+      "`git -C /x status` failed: fatal: not a git repository",
+    );
+  });
+
+  test("with no stderr the message names the exit code", () => {
+    const error = new GitError({ args: ["version"], exitCode: 1, stderr: "" });
+    expect(error.message).toBe("`git version` failed with exit code 1.");
+  });
+});
+
+describe("withBlocks", () => {
+  const leftovers = { type: "leftovers", items: [] };
+
+  test("adds blocks to an XrError and keeps its class and its own blocks", () => {
+    const first = { type: "value", key: "k", value: "v" };
+    const error = new GitError({ args: ["x"], exitCode: 1, stderr: "" });
+    Object.assign(error, { blocks: [first] });
+    const result = withBlocks(error, [leftovers]);
+    expect(result).toBe(error);
+    expect(result.blocks).toEqual([first, leftovers]);
+  });
+
+  test("wraps any other error as internal with the cause and its stack", () => {
+    const cause = new Error("EACCES: mkdir");
+    const result = withBlocks(cause, [leftovers]);
+    expect(result).toBeInstanceOf(XrError);
+    expect(result.code).toBe("internal");
+    expect(result.message).toBe("EACCES: mkdir");
+    expect(result.cause).toBe(cause);
+    expect(result.stack).toBe(cause.stack as string);
+    expect(result.blocks).toEqual([leftovers]);
+  });
+
+  test("wraps a thrown non-error as internal", () => {
+    expect(withBlocks("boom", []).message).toBe("boom");
   });
 });
 

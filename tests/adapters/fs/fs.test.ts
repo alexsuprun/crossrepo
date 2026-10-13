@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
-import { lstatSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { createFs } from "../../../src/adapters/fs/index.ts";
 import { XrError } from "../../../src/errors/index.ts";
@@ -82,5 +88,50 @@ describe("createFs", () => {
     }
     expect(thrown).not.toBeInstanceOf(XrError);
     expect(thrown).toMatchObject({ code: "EACCES" });
+  });
+});
+
+describe("createFs folders", () => {
+  test("mkdir makes one folder and fails when it exists or its parent is missing", () => {
+    const path = join(dir, ".crossrepo");
+    createFs().mkdir(path);
+    expect(lstatSync(path).isDirectory()).toBe(true);
+    expect(() => createFs().mkdir(path)).toThrow();
+    expect(() => createFs().mkdir(join(dir, "a", "b"))).toThrow();
+  });
+
+  test("remove deletes a file or a whole folder, and a missing path is fine", () => {
+    const file = writeFile(join(dir, "AGENTS.md"), "x");
+    const folder = join(dir, ".crossrepo");
+    writeFile(join(folder, "config.yaml"), "x");
+    createFs().remove(file);
+    createFs().remove(folder);
+    createFs().remove(join(dir, "missing"));
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  test("listDirs gives the child folder names sorted, without files", () => {
+    for (const name of ["web", "api", ".hidden", "Zed"]) {
+      mkdirSync(join(dir, name));
+    }
+    writeFile(join(dir, "README.md"), "");
+    expect(createFs().listDirs(dir)).toEqual([".hidden", "Zed", "api", "web"]);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "listDirs leaves out a symlink to a folder",
+    () => {
+      mkdirSync(join(dir, "api"));
+      symlinkSync(join(dir, "api"), join(dir, "link"));
+      expect(createFs().listDirs(dir)).toEqual(["api"]);
+    },
+  );
+
+  test("exists sees files and folders, and a .git file", () => {
+    writeFile(join(dir, "api", ".git"), "gitdir: ../x\n");
+    expect(createFs().exists(join(dir, "api", ".git"))).toBe(true);
+    expect(createFs().exists(join(dir, "api"))).toBe(true);
+    expect(createFs().exists(join(dir, "web"))).toBe(false);
   });
 });

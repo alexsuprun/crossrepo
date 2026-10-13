@@ -1,3 +1,4 @@
+import type { XrError } from "../errors/index.ts";
 import type { LiveEvent, Report } from "./report.ts";
 
 export type DiscoveryKind = "none" | "codebase" | "project";
@@ -21,27 +22,67 @@ export interface ConfigEntry {
 
 /** The merged config as commands see it. */
 export interface ConfigView {
-  codebase: string;
+  /** Absent when the folder is not a codebase yet. */
+  codebase?: string;
   entries: ConfigEntry[];
   projectsDir: { value: string; source: ConfigSource; resolved: string };
+}
+
+/** File and folder I/O. Every write goes through `writeFileAtomic`. */
+export interface CtxFs {
+  /** The file text, or `undefined` when the file does not exist. */
+  readText(path: string): string | undefined;
+  writeText(path: string, text: string): void;
+  /** Makes one folder. Fails when it exists or its parent is missing. */
+  mkdir(path: string): void;
+  /** Deletes a file or a whole folder. A missing path is not an error. */
+  remove(path: string): void;
+  /** The names of the folders directly in `path`, sorted. Symlinks are left out. */
+  listDirs(path: string): string[];
+  exists(path: string): boolean;
+}
+
+/** Named git calls. The first call checks that git is 2.27 or newer (`git-too-old`). */
+export interface CtxGit {
+  version(): Promise<string>;
+  /** The raw `origin` URL, or `undefined` when the repo has no `origin`. */
+  originUrl(dir: string): Promise<string | undefined>;
+  /** The branch `origin/HEAD` points to, without `origin/`, or `undefined`. */
+  originHead(dir: string): Promise<string | undefined>;
 }
 
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
 export interface Ctx {
   out: { emit(event: LiveEvent): void };
-  /** Text file I/O. `readText` gives `undefined` for a missing file; `writeText` is atomic. */
-  fs: {
-    readText(path: string): string | undefined;
-    writeText(path: string, text: string): void;
-  };
+  fs: CtxFs;
+  git: CtxGit;
   config: ConfigView;
   discovery: Discovery;
   /** stdin and stdout are a TTY, and neither `--json` nor `--no-interactive` is given. */
   interactive: boolean;
 }
 
+/** What a failed undo leaves behind, and the command that removes it by hand. */
+export interface Leftover {
+  what: string;
+  path: string;
+  command: string;
+}
+
+/** A plain copy of the `transaction` runner's `tx`, which services may not import. */
+export interface Tx {
+  step<T>(
+    label: string,
+    run: () => T | Promise<T>,
+    undo: (result: T) => void | Promise<void>,
+    manualCleanup: Leftover,
+  ): Promise<T>;
+}
+
 /** One `xr` command. `cli` checks the folder kind before `run`. */
 export interface CommandUnit {
   accepts: readonly DiscoveryKind[];
-  run(ctx: Ctx): Report;
+  /** The error for a folder kind not in `accepts`. Without it, `cli` gives `not-a-codebase`. */
+  refuse?(discovery: Discovery, fs: CtxFs): XrError;
+  run(ctx: Ctx): Promise<Report>;
 }

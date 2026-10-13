@@ -326,9 +326,7 @@ describe("report keys", () => {
     const blocks: Block[] = [
       { type: "repos", items: [] },
       { type: "checks", items: [] },
-      { type: "leftovers", items: [] },
       { type: "section", key: "s", title: "S", blocks: [] },
-      { type: "note", tone: "ok", text: "n" },
     ];
     for (const block of blocks) {
       for (const mode of ["json", "plain"] as const) {
@@ -476,5 +474,128 @@ describe("report in text mode", () => {
     });
     expect(written.stderr).toContain(ESC);
     expect(written.stderr).toContain("bad");
+  });
+});
+
+const added: Block = {
+  type: "table",
+  key: "added",
+  items: [
+    { repo: "api", remote: "git@h:api.git", defaultBranch: "main" },
+    {
+      repo: "website",
+      remote: { path: join(CODEBASE, "o") },
+      defaultBranch: "trunk",
+    },
+  ],
+};
+
+const leftovers: Block = {
+  type: "leftovers",
+  items: [
+    {
+      what: ".crossrepo folder",
+      path: { path: join(CODEBASE, ".crossrepo") },
+      command: { code: "rm -r .crossrepo" },
+    },
+  ],
+};
+
+describe("table, note and leftovers blocks in json mode", () => {
+  test("a table is a list of records with absolute paths", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [added] });
+    expect(JSON.parse(written.stdout)).toEqual({
+      ok: true,
+      warnings: [],
+      added: [
+        { repo: "api", remote: "git@h:api.git", defaultBranch: "main" },
+        {
+          repo: "website",
+          remote: join(CODEBASE, "o"),
+          defaultBranch: "trunk",
+        },
+      ],
+    });
+  });
+
+  test("notes collect into one notes list, in order", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [
+        { type: "note", tone: "muted", text: "first" },
+        { type: "note", tone: "warn", text: { code: "xr x" } },
+      ],
+    });
+    expect(JSON.parse(written.stdout).notes).toEqual(["first", "xr x"]);
+  });
+
+  test("a notes key next to a note block clashes", () => {
+    const { out } = capture("json");
+    expect(() =>
+      out.report({
+        blocks: [
+          { type: "value", key: "notes", value: "x" },
+          { type: "note", tone: "ok", text: "n" },
+        ],
+      }),
+    ).toThrow("notes");
+  });
+
+  test("leftovers in an error block are error.details.leftovers", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [],
+      error: { code: "git-failed", message: "m", blocks: [leftovers] },
+    });
+    expect(JSON.parse(written.stdout).error.details).toEqual({
+      leftovers: [
+        {
+          what: ".crossrepo folder",
+          path: join(CODEBASE, ".crossrepo"),
+          command: "rm -r .crossrepo",
+        },
+      ],
+    });
+  });
+});
+
+describe("table, note and leftovers blocks in text mode", () => {
+  test("a table prints one aligned row per record", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [added] });
+    expect(written.stdout).toBe(
+      [
+        "api      git@h:api.git  main",
+        "website  o              trunk",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("an empty table prints nothing", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [version, { type: "table", key: "t", items: [] }] });
+    expect(written.stdout).toBe("1.2.3\n");
+  });
+
+  test("a note is one line, in its tone on a rich stream", () => {
+    const plain = capture("plain");
+    plain.out.report({ blocks: [{ type: "note", tone: "warn", text: "n" }] });
+    expect(plain.written.stdout).toBe("n\n");
+    const rich = capture("rich");
+    rich.out.report({ blocks: [{ type: "note", tone: "warn", text: "n" }] });
+    expect(rich.written.stdout).toContain(ESC);
+  });
+
+  test("leftovers print what and path, then the command under them", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [],
+      error: { code: "git-failed", message: "m", blocks: [leftovers] },
+    });
+    expect(written.stderr).toBe(
+      "error: m\n\n.crossrepo folder: .crossrepo\n  rm -r .crossrepo\n",
+    );
   });
 });

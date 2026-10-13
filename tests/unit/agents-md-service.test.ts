@@ -12,6 +12,10 @@ function fakeFs(files: Record<string, string> = {}) {
       writes.push({ path, text });
       files[path] = text;
     },
+    mkdir: () => {},
+    remove: () => {},
+    listDirs: () => [],
+    exists: (path) => path in files,
   };
   return { fs, files, writes };
 }
