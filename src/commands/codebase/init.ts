@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { codebaseConfigName } from "../../domain/codebase-config.ts";
 import type { CommandUnit } from "../../domain/ctx.ts";
 import { ADD_HINT } from "../../domain/hints.ts";
 import { XrError } from "../../errors/index.ts";
@@ -19,10 +20,9 @@ export const codebaseInit: CommandUnit = {
         hint: "Run `xr codebase init` in the folder that holds your repos.",
       });
     }
-    const yml = join(discovery.dir, ".crossrepo", "config.yml");
-    const yaml = join(discovery.dir, ".crossrepo", "config.yaml");
-    const file =
-      fs.exists(yml) && !fs.exists(yaml) ? "config.yml" : "config.yaml";
+    const file = codebaseConfigName((name) =>
+      fs.exists(join(discovery.dir, ".crossrepo", name)),
+    );
     return new XrError({
       code: "already-a-codebase",
       message: `${discovery.dir} is already a codebase.`,

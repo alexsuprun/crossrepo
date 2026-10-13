@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
-import { renderCodebaseConfig } from "../../src/domain/codebase-config.ts";
+import {
+  addRepoEntry,
+  codebaseConfigName,
+  codebaseRepos,
+  renderCodebaseConfig,
+  repoKeys,
+} from "../../src/domain/codebase-config.ts";
+import { XrError } from "../../src/errors/index.ts";
 
 const HOOKS = `
 # project:
@@ -58,5 +65,160 @@ describe("renderCodebaseConfig", () => {
       ),
     });
     expect(text).toContain(`remote: ${"x".repeat(120)}\n`);
+  });
+});
+
+const NEW = {
+  name: "new",
+  remote: "file:///o/new.git",
+  defaultBranch: "main",
+};
+const NEW_LINES =
+  '  new:\n    remote: file:///o/new.git\n    default-branch: main\n    description: ""\n';
+
+/** A hand-edited config with comments, a folded text and an end-of-file comment. */
+const HAND_EDITED = `# top comment
+name: shop   # inline comment
+repos:
+  # the api
+  api:
+    remote: git@github.com:acme/api.git  # inline remote
+    default-branch: main
+    description: >
+      A long
+      folded text
+  web:
+    remote: "https://example.com/web.git"
+    default-branch: trunk
+    description: ''
+# between
+projects-dir: .p
+
+# end comment
+`;
+
+describe("addRepoEntry", () => {
+  test("adds the entry at the end of repos: in the init config and keeps the rest", () => {
+    const text = renderCodebaseConfig([
+      { name: "api", remote: "/o/api.git", defaultBranch: "main" },
+    ]);
+    const [head, tail] = text.split("\n\n# project:");
+    expect(addRepoEntry(text, NEW)).toBe(
+      `${head}\n${NEW_LINES}\n# project:${tail}`,
+    );
+  });
+
+  test("turns repos: {} into a block map", () => {
+    const text = renderCodebaseConfig([]);
+    expect(addRepoEntry(text, NEW)).toBe(
+      text.replace("repos: {}\n", `repos:\n${NEW_LINES}`),
+    );
+  });
+
+  test("a hand-edited config changes only in comment spacing and the folded text (pinned)", () => {
+    expect(addRepoEntry(HAND_EDITED, NEW)).toBe(`# top comment
+name: shop # inline comment
+repos:
+  # the api
+  api:
+    remote: git@github.com:acme/api.git # inline remote
+    default-branch: main
+    description: >
+      A long folded text
+  web:
+    remote: "https://example.com/web.git"
+    default-branch: trunk
+    description: ''
+${NEW_LINES}# between
+projects-dir: .p
+
+# end comment
+`);
+  });
+
+  test("a second write changes nothing more than its own entry", () => {
+    const once = addRepoEntry(HAND_EDITED, NEW);
+    const twice = addRepoEntry(once, { ...NEW, name: "next" });
+    expect(twice).toBe(
+      once.replace(
+        `${NEW_LINES}`,
+        `${NEW_LINES}${NEW_LINES.replace("  new:", "  next:")}`,
+      ),
+    );
+  });
+
+  test("a missing or null repos becomes a block map", () => {
+    expect(addRepoEntry("name: shop\n", NEW)).toBe(
+      `name: shop\nrepos:\n${NEW_LINES}`,
+    );
+    expect(addRepoEntry("repos:\nname: x\n", NEW)).toBe(
+      `repos:\n${NEW_LINES}name: x\n`,
+    );
+    expect(addRepoEntry("repos: ~\n", NEW)).toBe(`repos:\n${NEW_LINES}`);
+    expect(addRepoEntry("", NEW)).toBe(`repos:\n${NEW_LINES}`);
+  });
+
+  test("quotes values that YAML would read as something else", () => {
+    const repo = { name: "true", remote: "a: b", defaultBranch: "1.0" };
+    expect(parse(addRepoEntry("repos: {}\n", repo))).toEqual({
+      repos: {
+        true: { remote: "a: b", "default-branch": "1.0", description: "" },
+      },
+    });
+  });
+
+  test("repos that is not a map is invalid-config", () => {
+    expect(() => addRepoEntry("repos: [a]\n", NEW)).toThrow(XrError);
+    expect(() => addRepoEntry("repos: [\n", NEW)).toThrow(XrError);
+  });
+});
+
+describe("repoKeys", () => {
+  test("gives every key of repos:, also a key with a null value", () => {
+    expect(repoKeys(HAND_EDITED)).toEqual(["api", "web"]);
+    expect(repoKeys("repos:\n  api:\n  web: ~\n")).toEqual(["api", "web"]);
+  });
+
+  test("keeps a key as written, so 1.0 is not read as 1", () => {
+    expect(repoKeys("repos:\n  1.0:\n  0x1f: ~\n  '2.0': ~\n")).toEqual([
+      "1.0",
+      "0x1f",
+      "2.0",
+    ]);
+  });
+
+  test("no repos, null repos or an empty file gives no keys", () => {
+    expect(repoKeys("name: x\n")).toEqual([]);
+    expect(repoKeys("repos:\n")).toEqual([]);
+    expect(repoKeys("")).toEqual([]);
+  });
+});
+
+describe("codebaseRepos", () => {
+  test("gives each repo name and description in config order", () => {
+    expect(codebaseRepos(HAND_EDITED)).toEqual([
+      { name: "api", description: "A long folded text\n" },
+      { name: "web", description: "" },
+    ]);
+    expect(codebaseRepos("repos:\n  1.0:\n  b: {}\n")).toEqual([
+      { name: "1.0", description: undefined },
+      { name: "b", description: undefined },
+    ]);
+    expect(codebaseRepos("")).toEqual([]);
+  });
+});
+
+describe("codebaseConfigName", () => {
+  test("is config.yml only when config.yaml is missing and config.yml exists", () => {
+    const has =
+      (...names: string[]) =>
+      (name: string) =>
+        names.includes(name);
+    expect(codebaseConfigName(has("config.yaml"))).toBe("config.yaml");
+    expect(codebaseConfigName(has("config.yml"))).toBe("config.yml");
+    expect(codebaseConfigName(has("config.yaml", "config.yml"))).toBe(
+      "config.yaml",
+    );
+    expect(codebaseConfigName(has())).toBe("config.yaml");
   });
 });

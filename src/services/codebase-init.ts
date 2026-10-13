@@ -3,16 +3,17 @@ import {
   type ConfigRepo,
   renderCodebaseConfig,
 } from "../domain/codebase-config.ts";
-import type { Ctx, Tx } from "../domain/ctx.ts";
+import type { Ctx, GitCallOptions, Tx } from "../domain/ctx.ts";
 import type { Block, Text } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
 import { writeCodebaseSection } from "./agents-md.ts";
 
-type Problem = {
+/** One row of the `repos` table of a `repos-not-ready` error. */
+export interface RepoProblem {
   repo: string;
   problem: string;
   fix: Text;
-};
+}
 
 /**
  * Finds the repos directly in `dir` (folders with a `.git` entry, sorted by name)
@@ -28,60 +29,86 @@ export async function checkRepos(
     .listDirs(dir)
     .filter((name) => ctx.fs.exists(join(dir, name, ".git")));
   const repos: ConfigRepo[] = [];
-  const problems: Problem[] = [];
+  const problems: RepoProblem[] = [];
   for (const name of names) {
-    const repoDir = join(dir, name);
-    const remote = await ctx.git.originUrl(repoDir);
-    const defaultBranch =
-      remote === undefined ? undefined : await ctx.git.originHead(repoDir);
-    if (remote !== undefined && defaultBranch !== undefined) {
-      repos.push({ name, remote, defaultBranch });
-      ctx.out.emit({
-        type: "repo",
-        repo: name,
-        status: "ok",
-        message: defaultBranch,
-      });
-      continue;
-    }
-    const problem: Problem =
-      remote === undefined
-        ? {
-            repo: name,
-            problem: "no origin remote",
-            fix: { code: `git -C "${repoDir}" remote add origin <url>` },
-          }
-        : {
-            repo: name,
-            problem: "no origin/HEAD",
-            fix: { code: `git -C "${repoDir}" remote set-head origin --auto` },
-          };
-    problems.push(problem);
+    const result = await checkRepo(ctx, name, join(dir, name));
+    if ("problem" in result) problems.push(result);
+    else repos.push(result);
+  }
+  if (problems.length) {
+    throw reposNotReady(
+      problems,
+      "Run the fix for each repo, then run `xr codebase init` again.",
+    );
+  }
+  return repos;
+}
+
+/**
+ * Reads `origin` and `origin/HEAD` of the repo at `repoDir` and emits one `repo`
+ * event. Gives the config entry, or the problem when one of them is missing.
+ */
+export async function checkRepo(
+  ctx: Pick<Ctx, "git" | "out">,
+  name: string,
+  repoDir: string,
+  options?: GitCallOptions,
+): Promise<ConfigRepo | RepoProblem> {
+  const remote = await ctx.git.originUrl(repoDir, options);
+  const defaultBranch =
+    remote === undefined
+      ? undefined
+      : await ctx.git.originHead(repoDir, options);
+  if (remote !== undefined && defaultBranch !== undefined) {
     ctx.out.emit({
       type: "repo",
       repo: name,
-      status: "failed",
-      message: problem.problem,
+      status: "ok",
+      message: defaultBranch,
     });
+    return { name, remote, defaultBranch };
   }
-  if (problems.length) {
-    const list = problems.map((problem) => problem.repo).join(", ");
-    const table: Block = {
-      type: "table",
-      key: "repos",
-      items: problems,
-    };
-    throw new XrError({
-      code: "repos-not-ready",
-      message:
-        problems.length === 1
-          ? `1 repo is not ready: ${list}.`
-          : `${problems.length} repos are not ready: ${list}.`,
-      hint: "Run the fix for each repo, then run `xr codebase init` again.",
-      blocks: [table],
-    });
-  }
-  return repos;
+  const problem: RepoProblem =
+    remote === undefined
+      ? {
+          repo: name,
+          problem: "no origin remote",
+          fix: { code: `git -C "${repoDir}" remote add origin <url>` },
+        }
+      : {
+          repo: name,
+          problem: "no origin/HEAD",
+          fix: { code: `git -C "${repoDir}" remote set-head origin --auto` },
+        };
+  ctx.out.emit({
+    type: "repo",
+    repo: name,
+    status: "failed",
+    message: problem.problem,
+  });
+  return problem;
+}
+
+/** The `repos-not-ready` error with one `repos` table row per problem. */
+export function reposNotReady(
+  problems: readonly RepoProblem[],
+  hint: string,
+): XrError {
+  const list = problems.map((problem) => problem.repo).join(", ");
+  const table: Block = {
+    type: "table",
+    key: "repos",
+    items: problems.map((problem) => ({ ...problem })),
+  };
+  return new XrError({
+    code: "repos-not-ready",
+    message:
+      problems.length === 1
+        ? `1 repo is not ready: ${list}.`
+        : `${problems.length} repos are not ready: ${list}.`,
+    hint,
+    blocks: [table],
+  });
 }
 
 /**

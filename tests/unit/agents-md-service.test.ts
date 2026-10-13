@@ -16,6 +16,7 @@ function fakeFs(files: Record<string, string> = {}) {
     remove: () => {},
     listDirs: () => [],
     exists: (path) => path in files,
+    realpath: (path) => path,
   };
   return { fs, files, writes };
 }

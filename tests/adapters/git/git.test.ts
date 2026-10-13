@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createGit, parseVersion } from "../../../src/adapters/git/index.ts";
 import { GitError, XrError } from "../../../src/errors/index.ts";
 import { git, makeRepos } from "../../helpers/git.ts";
@@ -95,6 +96,62 @@ describe("createGit with real repos", () => {
       .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(GitError);
     expect((error as GitError).message).toContain("not found");
+  });
+});
+
+describe("createGit clone", () => {
+  test("clones the URL into dest, keeps the URL as given and streams git stderr", async () => {
+    const remotes = makeRepos(root, { api: { branch: "trunk" } });
+    const url = pathToFileURL(remotes.api as string).href;
+    const dest = join(iso.root, "copy", "api");
+    mkdirSync(join(iso.root, "copy"));
+    let streamed = "";
+    const adapter = createGit({
+      interactive: false,
+      env: env(),
+      stderr: (text) => {
+        streamed += text;
+      },
+    });
+    await adapter.clone(url, dest);
+    expect(existsSync(join(dest, ".git"))).toBe(true);
+    expect(await adapter.originUrl(dest)).toBe(url);
+    expect(await adapter.originHead(dest)).toBe("trunk");
+    expect(streamed).toContain("Cloning into");
+  });
+
+  test("a failed clone is a GitError with the git error, not the Cloning line", async () => {
+    const dest = join(iso.root, "api");
+    let streamed = "";
+    const error = await createGit({
+      interactive: false,
+      env: env(),
+      stderr: (text) => {
+        streamed += text;
+      },
+    })
+      .clone(pathToFileURL(join(iso.root, "missing.git")).href, dest)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
+    expect(error).toMatchObject({ code: "git-failed", exitCode: 128 });
+    expect((error as GitError).args.slice(0, 2)).toEqual(["clone", "--"]);
+    expect((error as GitError).message).not.toContain("Cloning into");
+    expect((error as GitError).message).toContain("failed: fatal:");
+    expect(streamed).toContain("fatal:");
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  test("git missing from PATH is a GitError", async () => {
+    const empty = join(iso.root, "empty");
+    mkdirSync(empty);
+    const error = await createGit({
+      interactive: false,
+      env: { ...env(), PATH: empty, Path: empty },
+      stderr: () => {},
+    })
+      .clone("file:///x.git", join(iso.root, "x"))
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
   });
 });
 
@@ -255,6 +312,114 @@ describe.skipIf(process.platform === "win32")(
         .originHead(root, { signal: AbortSignal.abort() })
         .catch((thrown: unknown) => thrown);
       expect(head).toMatchObject({ exitCode: null });
+    });
+
+    test("clone runs `git clone -- <url> <dest>`, with --progress only when asked", async () => {
+      const fake = fakeGit("2.40.0");
+      const quiet = createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+      });
+      await quiet.clone("git@example.com:acme/api.git", join(root, "api"));
+      const loud = createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+        progress: true,
+      });
+      await loud.clone("file:///o/web.git", join(root, "web"));
+      const calls = readFileSync(fake.log, "utf8").trim().split("\n");
+      expect(calls).toEqual([
+        "version",
+        `clone -- git@example.com:acme/api.git ${join(root, "api")}`,
+        "version",
+        `clone --progress -- file:///o/web.git ${join(root, "web")}`,
+      ]);
+    });
+
+    test("a failed clone's GitError leaves out the Cloning line and progress lines", async () => {
+      const bin = join(iso.root, "noisy-bin");
+      const script = writeFile(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          "printf \"Cloning into 'x'...\\n\" >&2",
+          "printf 'remote: Counting objects:  50%% (1/2)\\rremote: Counting objects: 100%% (2/2), done.\\n' >&2",
+          "printf 'Receiving objects:  45%% (9/20)\\rReceiving objects: 100%% (20/20), 1.2 KiB | 1.2 MiB/s, done.\\n' >&2",
+          "echo 'fatal: early EOF' >&2",
+          "exit 128",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(script, 0o755);
+      const error = await createGit({
+        interactive: false,
+        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+        stderr: () => {},
+      })
+        .clone("file:///o/api.git", join(root, "api"))
+        .catch((thrown: unknown) => thrown);
+      expect(error).toMatchObject({
+        exitCode: 128,
+        stderr: "fatal: early EOF",
+      });
+      expect((error as GitError).message).toEndWith("failed: fatal: early EOF");
+    });
+
+    test("clone checks the git version first", async () => {
+      const fake = fakeGit("2.26.0");
+      const error = await createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+      })
+        .clone("file:///o/api.git", join(root, "api"))
+        .catch((thrown: unknown) => thrown);
+      expect(error).toMatchObject({ code: "git-too-old" });
+    });
+
+    test("an aborted signal stops git clone: GitError with exitCode null", async () => {
+      const bin = join(iso.root, "slow-bin");
+      const script = writeFile(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          "echo \"Cloning into 'x'...\" >&2",
+          "exec sleep 10",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(script, 0o755);
+      let streamed = "";
+      const controller = new AbortController();
+      const adapter = createGit({
+        interactive: false,
+        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+        // Stop git once it has started and written its first line.
+        stderr: (text) => {
+          streamed += text;
+          controller.abort();
+        },
+      });
+      const started = Date.now();
+      const error = await adapter
+        .clone("file:///o/api.git", join(root, "api"), {
+          signal: controller.signal,
+        })
+        .catch((thrown: unknown) => thrown);
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(error).toBeInstanceOf(GitError);
+      expect(error).toMatchObject({ code: "git-failed", exitCode: null });
+      expect(streamed).toContain("Cloning into");
+      const early = await adapter
+        .clone("file:///o/api.git", join(root, "web"), {
+          signal: AbortSignal.abort(),
+        })
+        .catch((thrown: unknown) => thrown);
+      expect(early).toMatchObject({ exitCode: null });
     });
 
     test("interactive: only LC_ALL=C is set", async () => {

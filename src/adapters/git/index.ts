@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { GitError, XrError } from "../../errors/index.ts";
 
 /** Options of every git call. An aborted `signal` stops git: `GitError` with `exitCode: null`. */
@@ -17,12 +17,21 @@ export interface Git {
     dir: string,
     options?: GitCallOptions,
   ): Promise<string | undefined>;
+  /**
+   * `git clone -- <url> <dest>`, with the URL as given (AD-6). git's stderr goes
+   * to the `stderr` option as it comes; a failure is a `GitError` with its end.
+   */
+  clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
 }
 
 export interface CreateGitOptions {
   /** When false, git may never wait for a password or a prompt. */
   interactive: boolean;
   env: Readonly<Record<string, string | undefined>>;
+  /** Gets git's live stderr of `clone`. Default: the process stderr. */
+  stderr?: (text: string) => void;
+  /** Adds `--progress` to `clone`; set it only when the process stderr is a TTY. */
+  progress?: boolean;
 }
 
 const MIN_VERSION = [2, 27] as const;
@@ -36,8 +45,16 @@ interface Result {
   stderr: string;
 }
 
+/** The most stderr a `clone` keeps for its `GitError`, from the end. */
+const KEPT_STDERR = 8192;
+
 /** Builds `ctx.git`. The first call of any method checks that git is 2.27 or newer. */
-export function createGit({ interactive, env }: CreateGitOptions): Git {
+export function createGit({
+  interactive,
+  env,
+  stderr = (text) => process.stderr.write(text),
+  progress = false,
+}: CreateGitOptions): Git {
   const gitEnv = buildEnv(env, interactive);
 
   async function exec(
@@ -71,6 +88,51 @@ export function createGit({ interactive, env }: CreateGitOptions): Git {
           );
         },
       );
+    });
+  }
+
+  /** Runs git with stderr streamed to `stderr`, unlike the buffered `exec`. */
+  function stream(
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Result> {
+    return new Promise((resolve, reject) => {
+      const stopped = (message: string) =>
+        reject(new GitError({ args, exitCode: null, stderr: message }));
+      if (signal?.aborted) {
+        stopped("Stopped before git started.");
+        return;
+      }
+      let kept = "";
+      const child = spawn("git", args, {
+        env: gitEnv,
+        windowsHide: true,
+        // A TTY stdin lets git ask for a password when interactive.
+        stdio: [interactive ? "inherit" : "ignore", "ignore", "pipe"],
+      });
+      const abort = () => child.kill();
+      signal?.addEventListener("abort", abort, { once: true });
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk: string) => {
+        stderr(chunk);
+        kept = (kept + chunk).slice(-KEPT_STDERR);
+      });
+      child.on("error", (error) => {
+        signal?.removeEventListener("abort", abort);
+        stopped(
+          (error as { code?: unknown }).code === "ENOENT"
+            ? "git was not found on PATH. Install git 2.27 or newer."
+            : error.message,
+        );
+      });
+      child.on("close", (code) => {
+        signal?.removeEventListener("abort", abort);
+        if (code === null || signal?.aborted) {
+          stopped(kept || "Stopped by a signal.");
+          return;
+        }
+        resolve({ exitCode: code, stdout: "", stderr: kept });
+      });
     });
   }
 
@@ -121,7 +183,35 @@ export function createGit({ interactive, env }: CreateGitOptions): Git {
       );
       return head?.replace(/^(remotes\/)?origin\//, "");
     },
+    async clone(url, dest, options) {
+      await checkVersion();
+      const args = [
+        "clone",
+        ...(progress ? ["--progress"] : []),
+        "--",
+        url,
+        dest,
+      ];
+      const { exitCode, stderr: text } = await stream(args, options?.signal);
+      if (exitCode !== 0) {
+        throw new GitError({ args, exitCode, stderr: cloneErrors(text) });
+      }
+    },
   };
+}
+
+/** A progress update, such as `Receiving objects:  45% (9/20)`, maybe after `remote: `. */
+const PROGRESS = /^(remote: )?[A-Za-z ]+:\s+\d+% \(/;
+
+/** The stderr lines of a failed clone without the `Cloning into` line and progress updates. */
+function cloneErrors(stderr: string): string {
+  return stderr
+    .split(/\r?\n|\r/)
+    .filter(
+      (line) =>
+        line.trim() && !line.startsWith("Cloning into") && !PROGRESS.test(line),
+    )
+    .join("\n");
 }
 
 function buildEnv(

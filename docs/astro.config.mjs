@@ -18,6 +18,7 @@ export default defineConfig({
 					label: 'Commands',
 					items: [
 						{ label: 'xr codebase init', slug: 'commands/codebase-init' },
+						{ label: 'xr codebase repo add', slug: 'commands/codebase-repo-add' },
 						{ label: 'xr codebase repo list', slug: 'commands/codebase-repo-list' },
 						{ label: 'xr config show', slug: 'commands/config-show' },
 					],
