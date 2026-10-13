@@ -114,13 +114,13 @@ jobs:
         id: no-node
         run: |
           bun_dir="$(dirname "$(command -v bun)")"
-          # xr needs git; on Windows it is not in /usr/bin.
-          git_dir="$(dirname "$(command -v git)")"
           if [ "$RUNNER_OS" = "Windows" ]; then
+            # xr needs git. Elsewhere it is in /usr/bin, but on macOS its own folder also holds node.
+            git_dir="$(dirname "$(command -v git)")"
             win_dir="$(cygpath -u "$SYSTEMROOT")"
             echo "path=$bun_dir:$git_dir:/usr/bin:/bin:$win_dir/system32:$win_dir" >> "$GITHUB_OUTPUT"
           else
-            echo "path=$bun_dir:$git_dir:/usr/bin:/bin:/usr/sbin:/sbin" >> "$GITHUB_OUTPUT"
+            echo "path=$bun_dir:/usr/bin:/bin:/usr/sbin:/sbin" >> "$GITHUB_OUTPUT"
           fi
       - name: Check node is not found
         run: |
