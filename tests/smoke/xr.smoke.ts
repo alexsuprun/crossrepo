@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -11,6 +11,10 @@ const bundle = fileURLToPath(new URL("../../dist/xr.js", import.meta.url));
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as { version: string };
+
+// Each test spawns git and the bundle; slow CI runners passed 5 s (7.4 s seen on macOS).
+// The `timeout` key in bunfig is ignored by `bun test`, so set it here.
+setDefaultTimeout(30_000);
 
 const runtimes = smokeRuntimes(process.env.XR_SMOKE_RUNTIMES, process.execPath);
 
