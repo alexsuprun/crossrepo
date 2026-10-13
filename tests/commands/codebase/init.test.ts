@@ -1,20 +1,34 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, join } from "node:path";
 import * as fsAdapter from "../../../src/adapters/fs/index.ts";
+import { createLock } from "../../../src/adapters/lock/index.ts";
 import { main } from "../../../src/cli/index.ts";
 import { renderCodebaseConfig } from "../../../src/domain/codebase-config.ts";
 import { transaction } from "../../../src/runners/transaction.ts";
 import { writeCodebaseFiles } from "../../../src/services/codebase-init.ts";
-import { withFault } from "../../helpers/faults.ts";
+import { afterCall, withFault } from "../../helpers/faults.ts";
 import { git, makeRepos } from "../../helpers/git.ts";
+import {
+  type FakeInterrupts,
+  fakeInterrupts,
+} from "../../helpers/interrupts.ts";
 import { type Isolation, isolate, writeFile } from "../../helpers/isolate.ts";
 
 let iso: Isolation;
 let codebase: string;
 let configFile: string;
 let agentsFile: string;
+let lockFile: string;
 let spies: { mockRestore(): void }[];
+let interrupts: FakeInterrupts;
 
 beforeEach(() => {
   iso = isolate();
@@ -22,7 +36,9 @@ beforeEach(() => {
   mkdirSync(codebase);
   configFile = join(codebase, ".crossrepo", "config.yaml");
   agentsFile = join(codebase, "AGENTS.md");
+  lockFile = join(codebase, ".crossrepo", "xr.lock");
   spies = [];
+  interrupts = fakeInterrupts();
 });
 
 afterEach(() => {
@@ -53,6 +69,7 @@ async function run(
     isTTY: { stdin: false, stdout: false, stderr: false },
     cwd,
     home: iso.home,
+    interrupts,
     stdout: (text) => {
       stdout += text;
     },
@@ -384,38 +401,53 @@ describe("xr codebase init undo", () => {
 
 describe("writeCodebaseFiles undo", () => {
   const repos = [{ name: "api", remote: "/o/api.git", defaultBranch: "main" }];
-  const ctx = () => ({ out: { emit() {} }, fs: fsAdapter.createFs() });
+  const ctx = (fs = fsAdapter.createFs()) => ({
+    out: { emit() {} },
+    fs,
+    lock: { path: lockFile, adapter: createLock() },
+    interrupts: fakeInterrupts(),
+  });
+  const afterFirst = { lock: "after-first-step" } as const;
 
   test("puts the old AGENTS.md text back", async () => {
     writeFile(agentsFile, "# Team\n");
-    const failed = transaction(ctx(), async (tx) => {
-      await writeCodebaseFiles(ctx(), tx, codebase, repos);
-      throw new Error("later");
-    });
+    const failed = transaction(
+      ctx(),
+      async (tx) => {
+        await writeCodebaseFiles(ctx(), tx, codebase, repos);
+        throw new Error("later");
+      },
+      afterFirst,
+    );
     await expect(failed).rejects.toThrow("later");
     expect(readFileSync(agentsFile, "utf8")).toBe("# Team\n");
     expect(existsSync(join(codebase, ".crossrepo"))).toBe(false);
   });
 
   test("removes an AGENTS.md it made", async () => {
-    const failed = transaction(ctx(), async (tx) => {
-      await writeCodebaseFiles(ctx(), tx, codebase, repos);
-      throw new Error("later");
-    });
+    const failed = transaction(
+      ctx(),
+      async (tx) => {
+        await writeCodebaseFiles(ctx(), tx, codebase, repos);
+        throw new Error("later");
+      },
+      afterFirst,
+    );
     await expect(failed).rejects.toThrow("later");
     expectUntouched();
   });
 
   test("a failed AGENTS.md undo gives a leftover for it", async () => {
     writeFile(agentsFile, "# Team\n");
-    const broken = {
-      out: { emit() {} },
-      fs: withFault(fsAdapter.createFs(), "writeText", 3),
-    };
-    const failed = await transaction(broken, async (tx) => {
-      await writeCodebaseFiles(broken, tx, codebase, repos);
-      throw new Error("later");
-    }).catch((error: unknown) => error);
+    const broken = ctx(withFault(fsAdapter.createFs(), "writeText", 3));
+    const failed = await transaction(
+      broken,
+      async (tx) => {
+        await writeCodebaseFiles(broken, tx, codebase, repos);
+        throw new Error("later");
+      },
+      afterFirst,
+    ).catch((error: unknown) => error);
     expect((failed as { blocks: unknown[] }).blocks).toEqual([
       {
         type: "leftovers",
@@ -429,6 +461,132 @@ describe("writeCodebaseFiles undo", () => {
           },
         ],
       },
+    ]);
+  });
+});
+
+describe("xr codebase init lock", () => {
+  test("takes the lock after .crossrepo/ exists and releases it at the end", async () => {
+    makeRepos(codebase, { api: {} });
+    let during: string | undefined;
+    fakeFs((fs) =>
+      afterCall(fs, "writeText", 1, () => {
+        during = readFileSync(lockFile, "utf8");
+      }),
+    );
+    const result = await json(["codebase", "init"]);
+    expect(result.code).toBe(0);
+    expect(during).toBe(`${process.pid}\n`);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("a lock held by a running process: lock-held, exit 1, nothing written", async () => {
+    makeRepos(codebase, { api: {} });
+    fakeFs((fs) =>
+      afterCall(fs, "mkdir", 1, () => {
+        writeFileSync(lockFile, `${process.ppid}\n`);
+      }),
+    );
+    const result = await json(["codebase", "init"]);
+    expect(result.code).toBe(1);
+    expect(result.data).toMatchObject({
+      ok: false,
+      warnings: [],
+      error: {
+        code: "lock-held",
+        message: `another xr command is running (pid ${process.ppid})`,
+      },
+    });
+    expectUntouched();
+  });
+
+  test("a stale lock is taken over with a stale-lock warning", async () => {
+    makeRepos(codebase, { api: {} });
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    fakeFs((fs) =>
+      afterCall(fs, "mkdir", 1, () => {
+        writeFileSync(lockFile, `${dead}\n`);
+      }),
+    );
+    const result = await json(["codebase", "init"]);
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([
+      {
+        code: "stale-lock",
+        message: expect.stringContaining(`pid ${dead}`),
+      },
+    ]);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("XR_TEST_STEP_DELAY_MS waits after each step", async () => {
+    makeRepos(codebase, { api: {} });
+    const started = Date.now();
+    const result = await json(["codebase", "init"], {
+      env: { ...testEnv(), XR_TEST_STEP_DELAY_MS: "40" },
+    });
+    expect(result.code).toBe(0);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(110);
+  });
+
+  test("config show runs as usual while the lock is held", async () => {
+    writeFile(configFile, "name: shop\n");
+    writeFile(lockFile, `${process.ppid}\n`);
+    const result = await json(["config", "show"]);
+    expect(result.code).toBe(0);
+    expect(result.data.ok).toBe(true);
+    expect(readFileSync(lockFile, "utf8")).toBe(`${process.ppid}\n`);
+  });
+});
+
+describe("xr codebase init Ctrl-C", () => {
+  for (const [step, method, nth] of [
+    ["Create .crossrepo/", "mkdir", 1],
+    ["Write .crossrepo/config.yaml", "writeText", 1],
+    ["Write AGENTS.md", "writeText", 2],
+  ] as const) {
+    test(`at "${step}": everything is undone, exit 130, interrupted`, async () => {
+      makeRepos(codebase, { api: {} });
+      fakeFs((fs) => afterCall(fs, method, nth, () => interrupts.fire()));
+      const result = await run(["--json", "codebase", "init"]);
+      expect(result.code).toBe(130);
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: false,
+        warnings: [],
+        error: { code: "interrupted", message: "Stopped by Ctrl-C." },
+      });
+      expect(result.stderr).toContain(`✓ ${step}`);
+      expectUntouched();
+      expect(interrupts.listening).toBe(0);
+    });
+
+    test(`at "${step}": an old AGENTS.md gets its text back`, async () => {
+      makeRepos(codebase, { api: {} });
+      writeFile(agentsFile, "# Team\n");
+      fakeFs((fs) => afterCall(fs, method, nth, () => interrupts.fire()));
+      const result = await run(["codebase", "init"]);
+      expect(result.code).toBe(130);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Stopped by Ctrl-C.");
+      expect(readFileSync(agentsFile, "utf8")).toBe("# Team\n");
+      expect(existsSync(join(codebase, ".crossrepo"))).toBe(false);
+    });
+  }
+
+  test("a failed undo keeps the code interrupted and lists leftovers", async () => {
+    makeRepos(codebase, { api: {} });
+    fakeFs((fs) =>
+      withFault(
+        afterCall(fs, "writeText", 2, () => interrupts.fire()),
+        "remove",
+        1,
+      ),
+    );
+    const result = await json(["codebase", "init"]);
+    expect(result.code).toBe(130);
+    expect(result.data.error.code).toBe("interrupted");
+    expect(result.data.error.details.leftovers).toEqual([
+      { what: "AGENTS.md", path: agentsFile, command: `rm "${agentsFile}"` },
     ]);
   });
 });

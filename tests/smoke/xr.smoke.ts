@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeRepos } from "../helpers/git.ts";
 import { isolate, writeFile } from "../helpers/isolate.ts";
@@ -137,6 +137,93 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
       iso.restore();
     }
   });
+
+  test.skipIf(process.platform === "win32")(
+    "a real SIGINT during codebase init undoes it and exits 130",
+    async () => {
+      const iso = isolate();
+      try {
+        const codebase = join(iso.root, "shop");
+        makeRepos(codebase, { api: {} });
+        const child = spawn(command, [bundle, "codebase", "init", "--json"], {
+          cwd: codebase,
+          env: { ...process.env, XR_TEST_STEP_DELAY_MS: "30000" },
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+          if (stderr.includes("✓ Create .crossrepo/")) child.kill("SIGINT");
+        });
+        const [code, signal] = await new Promise<
+          [number | null, string | null]
+        >((resolve) => child.on("close", (c, s) => resolve([c, s])));
+        expect({ code, signal }).toEqual({ code: 130, signal: null });
+        expect(JSON.parse(stdout)).toEqual({
+          ok: false,
+          warnings: [],
+          error: { code: "interrupted", message: "Stopped by Ctrl-C." },
+        });
+        expect(existsSync(join(codebase, ".crossrepo"))).toBe(false);
+        expect(existsSync(join(codebase, "AGENTS.md"))).toBe(false);
+      } finally {
+        iso.restore();
+      }
+    },
+    20_000,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a real SIGINT while git runs before the transaction ends xr by the signal",
+    async () => {
+      const iso = isolate();
+      try {
+        const codebase = join(iso.root, "shop");
+        makeRepos(codebase, { api: {} });
+        const marker = join(iso.root, "git-started");
+        const bin = join(iso.root, "slow-bin");
+        const script = writeFile(
+          join(bin, "git"),
+          [
+            "#!/bin/sh",
+            'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+            `touch "${marker}"`,
+            "exec sleep 5",
+            "",
+          ].join("\n"),
+        );
+        chmodSync(script, 0o755);
+        const child = spawn(command, [bundle, "codebase", "init", "--json"], {
+          cwd: codebase,
+          env: {
+            ...process.env,
+            PATH: [bin, process.env.PATH].join(delimiter),
+          },
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        const closed = new Promise<[number | null, string | null]>((resolve) =>
+          child.on("close", (c, s) => resolve([c, s])),
+        );
+        while (!existsSync(marker)) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        child.kill("SIGINT");
+        const [code, signal] = await closed;
+        expect({ code, signal }).toEqual({ code: null, signal: "SIGINT" });
+        expect(stdout).toBe("");
+        expect(existsSync(join(codebase, ".crossrepo"))).toBe(false);
+      } finally {
+        iso.restore();
+      }
+    },
+    20_000,
+  );
 
   test("--json --nope prints one JSON error object on stdout and exits 2", () => {
     const result = spawnSync(command, [bundle, "--json", "--nope"], {

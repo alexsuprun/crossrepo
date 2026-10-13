@@ -37,9 +37,16 @@ describe("ERROR_CODES", () => {
       "repos-not-ready",
       "already-a-codebase",
       "inside-a-project",
+      "lock-held",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);
+    }
+  });
+
+  test("holds the lock and Ctrl-C codes", () => {
+    for (const code of ["lock-held", "interrupted", "stale-lock"] as const) {
+      expect(ERROR_CODES).toContain(code);
     }
   });
 
@@ -136,6 +143,12 @@ describe("withBlocks", () => {
 describe("exitCodeFor", () => {
   test("maps usage to 2", () => {
     expect(exitCodeFor(new XrError({ code: "usage", message: "x" }))).toBe(2);
+  });
+
+  test("maps interrupted to 130", () => {
+    expect(
+      exitCodeFor(new XrError({ code: "interrupted", message: "x" })),
+    ).toBe(EXIT_INTERRUPTED);
   });
 
   test("maps any other code to 1", () => {

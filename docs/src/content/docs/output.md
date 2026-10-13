@@ -97,12 +97,15 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`. `error.details.repos` lists each repo with the command that fixes it. |
 | `already-a-codebase` | `xr codebase init` ran in a folder that is a codebase already, or that has a `.crossrepo/` folder. |
 | `inside-a-project` | `xr codebase init` ran in a project folder. |
+| `lock-held` | Another `xr` command that changes files is running in this codebase. The message has its process ID (pid). Wait for it to end, then run the command again. `xr` does not wait or retry. |
+| `interrupted` | You pressed Ctrl-C. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
 
 Warning codes, in `warnings`:
 
 | Code | Meaning |
 | --- | --- |
 | `unknown-config-key` | A config file has a key that `xr` does not know. The hint names the closest known key. The command still runs. |
+| `stale-lock` | The codebase lock belonged to a process that is not running any more, so `xr` took it over. The message has the old process ID. |
 
 New commands add new codes. A script must handle a code that it does not know as a failure.
 
@@ -111,5 +114,12 @@ New commands add new codes. A script must handle a code that it does not know as
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | Any failure that is not a usage error. |
+| `1` | Any failure that is not a usage error or Ctrl-C. |
 | `2` | A usage error. |
+| `130` | Ctrl-C (`interrupted`). |
+
+## Lock and Ctrl-C
+
+Commands that change files take a lock: the file `.crossrepo/xr.lock` in the codebase, with the process ID of the `xr` command in it. Only one such command can run in a codebase at a time. Another one fails at once with `lock-held`. Commands that only read, such as `xr config show`, take no lock. When the process in the lock is not running any more, for example after a crash, the next command takes the lock over and gives the `stale-lock` warning. A lock file with no valid process ID in it is taken over too, with no warning. A process ID that the system gave to a new process looks like a running command, so delete `.crossrepo/xr.lock` by hand only when you are sure no `xr` command runs.
+
+Ctrl-C stops a command that changes files: it stops the step that runs, starts no new step, undoes the steps that are done, and exits with code 130 and the `interrupted` error. A step that deletes things for good, at the end of a remove, is not stopped: Ctrl-C takes effect after that step ends. Ctrl-C before the first step, for example while `xr` checks the repos, ends `xr` the default way: there is no JSON output and nothing is written. A second Ctrl-C stops the undo and exits at once. Then `error.details.leftovers` lists what is left, and the lock stays until the next command takes it over.

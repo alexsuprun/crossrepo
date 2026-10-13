@@ -225,6 +225,38 @@ describe.skipIf(process.platform === "win32")(
       expect(out).toBe("GIT_DIR=|GIT_WORK_TREE=|GIT_INDEX_FILE=|");
     });
 
+    test("an aborted signal stops git: GitError with exitCode null", async () => {
+      const bin = join(iso.root, "slow-bin");
+      const script = writeFile(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          "exec sleep 10",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(script, 0o755);
+      const adapter = createGit({
+        interactive: false,
+        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+      });
+      const controller = new AbortController();
+      const started = Date.now();
+      const call = adapter
+        .originUrl(root, { signal: controller.signal })
+        .catch((thrown: unknown) => thrown);
+      setTimeout(() => controller.abort(), 200);
+      const error = await call;
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(error).toBeInstanceOf(GitError);
+      expect(error).toMatchObject({ code: "git-failed", exitCode: null });
+      const head = await adapter
+        .originHead(root, { signal: AbortSignal.abort() })
+        .catch((thrown: unknown) => thrown);
+      expect(head).toMatchObject({ exitCode: null });
+    });
+
     test("interactive: only LC_ALL=C is set", async () => {
       const fake = fakeGit("2.40.0");
       const out = await createGit({

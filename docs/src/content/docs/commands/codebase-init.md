@@ -28,6 +28,12 @@ It never runs `git init`, never commits and never changes `.gitignore`. If any r
 
 It needs git 2.27 or newer.
 
+## Lock and Ctrl-C
+
+`xr codebase init` takes the codebase lock, `.crossrepo/xr.lock`, right after step 3 makes `.crossrepo/`, and deletes it at the end. While it runs, another `xr` command that changes files in this folder fails with `lock-held`.
+
+Ctrl-C during steps 3 to 5 undoes the steps that are done: `.crossrepo/` is deleted, a new `AGENTS.md` is deleted, and an old `AGENTS.md` gets its old text back. Then `xr` exits with code 130 and the `interrupted` error. Ctrl-C during steps 1 and 2 stops `xr` at once, before anything is written. See [Lock and Ctrl-C](../../output/#lock-and-ctrl-c).
+
 ## The config
 
 Each repo gets its `remote`, its `default-branch` and an empty `description`. The file also has two hook examples that are commented out: one copies untracked files such as `.env` into each new worktree, and one stops a remove when a worktree has commits that are not pushed.
@@ -97,7 +103,9 @@ With no repos, `added` is empty and `notes` has the hint to add a repo.
 | `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`. Nothing is written. `error.details.repos` lists each repo as `{ "repo", "problem", "fix" }`, where `fix` is the git command to run. |
 | `git-too-old` | git is older than 2.27. The message has the version found. |
 | `git-failed` | A git command failed, for example in a broken repo. |
+| `lock-held` | Another `xr` command holds the lock of this folder. Nothing is written. |
+| `interrupted` | You pressed Ctrl-C during steps 3 to 5. The steps that were done are undone. The exit code is 130. |
 
-When a step fails and an undo also fails, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`.
+When a step fails and an undo also fails, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The same is true after Ctrl-C.
 
 See [Output and errors](../../output/) for the exit codes.
