@@ -121,7 +121,7 @@ function buildEnv(
 }
 
 /** The version from `git version` output; throws `git-too-old` below 2.27. */
-function parseVersion(stdout: string): string {
+export function parseVersion(stdout: string): string {
   const match = /^git version ((\d+)\.(\d+)\S*)/.exec(stdout.trim());
   if (!match) {
     throw new GitError({

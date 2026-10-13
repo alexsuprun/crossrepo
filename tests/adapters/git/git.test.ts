@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { createGit } from "../../../src/adapters/git/index.ts";
+import { createGit, parseVersion } from "../../../src/adapters/git/index.ts";
 import { GitError, XrError } from "../../../src/errors/index.ts";
 import { git, makeRepos } from "../../helpers/git.ts";
 import { type Isolation, isolate, writeFile } from "../../helpers/isolate.ts";
@@ -118,6 +118,35 @@ function fakeGit(version: string): { env: NodeJS.ProcessEnv; log: string } {
     log,
   };
 }
+
+describe("parseVersion", () => {
+  test("gives the version from `git version`, with any suffix", () => {
+    expect(parseVersion("git version 2.27.0\n")).toBe("2.27.0");
+    expect(parseVersion("git version 2.45.1.windows.1\n")).toBe(
+      "2.45.1.windows.1",
+    );
+    expect(parseVersion("git version 3.0.0")).toBe("3.0.0");
+  });
+
+  test("below 2.27 is git-too-old with the found version and an upgrade hint", () => {
+    for (const out of ["git version 2.26.9", "git version 1.99.0"]) {
+      let thrown: unknown;
+      try {
+        parseVersion(out);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(XrError);
+      expect(thrown).toMatchObject({ code: "git-too-old" });
+      expect((thrown as XrError).message).toContain(out.slice(12));
+      expect((thrown as XrError).hint).toContain("Upgrade git");
+    }
+  });
+
+  test("text that is not a git version is git-failed", () => {
+    expect(() => parseVersion("hello")).toThrow(GitError);
+  });
+});
 
 describe.skipIf(process.platform === "win32")(
   "createGit with a fake git",
