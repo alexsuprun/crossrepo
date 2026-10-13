@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
 import { writeFileAtomic } from "../../config/index.ts";
@@ -21,6 +22,8 @@ export interface Fs {
   /** The names of the folders directly in `path`, sorted. Symlinks are left out. */
   listDirs(path: string): string[];
   exists(path: string): boolean;
+  /** The absolute path with every symlink resolved. Throws when the path is missing. */
+  realpath(path: string): string;
 }
 
 /** Builds `ctx.fs`. `platform` lets tests reach the Windows rename retry. */
@@ -62,6 +65,9 @@ export function createFs(platform: NodeJS.Platform = process.platform): Fs {
     },
     exists(path) {
       return existsSync(path);
+    },
+    realpath(path) {
+      return realpathSync(path);
     },
   };
 }

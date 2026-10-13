@@ -94,9 +94,11 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `file-busy` | `xr` could not write a file because another program is using it (Windows only). Close that program and run the command again. |
 | `git-too-old` | git is older than 2.27. Upgrade git. |
 | `git-failed` | A git command failed. The message names the command and the first line git printed. |
-| `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`. `error.details.repos` lists each repo with the command that fixes it. |
+| `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`, or a folder given to `xr codebase repo add` is not a repo. `error.details.repos` lists each repo with the fix. |
 | `already-a-codebase` | `xr codebase init` ran in a folder that is a codebase already, or that has a `.crossrepo/` folder. |
 | `inside-a-project` | `xr codebase init` ran in a project folder. |
+| `repo-exists` | `xr codebase repo add` got a name that the codebase config has already, or the folder to clone into exists. |
+| `not-in-codebase` | `xr codebase repo add` got a folder that is not directly in the codebase folder. Move the folder into the codebase first. |
 | `lock-held` | Another `xr` command that changes files is running in this codebase. The message has its process ID (pid). Wait for it to end, then run the command again. `xr` does not wait or retry. |
 | `interrupted` | You pressed Ctrl-C. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
 

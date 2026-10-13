@@ -4,6 +4,7 @@ import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
+import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
@@ -77,6 +78,8 @@ const BUG_HINT =
 interface Parsed {
   report?: Report;
   command?: CommandUnit;
+  /** The positional arguments of `command`. */
+  args?: readonly string[];
 }
 
 /** Runs the `xr` CLI on `argv` (without the node and script paths) and returns the exit code. */
@@ -90,8 +93,9 @@ export async function main(options: MainOptions): Promise<number> {
     help: (text) => {
       parsed.report = helpReport(text);
     },
-    select: (command) => {
+    select: (command, args = []) => {
       parsed.command = command;
+      parsed.args = args;
     },
   });
 
@@ -146,7 +150,14 @@ export async function main(options: MainOptions): Promise<number> {
     try {
       const report =
         parsed.command && discovery
-          ? await runCommand(parsed.command, discovery, flags, options, out)
+          ? await runCommand(
+              parsed.command,
+              parsed.args ?? [],
+              discovery,
+              flags,
+              options,
+              out,
+            )
           : (parsed.report ?? { blocks: [] });
       out.report(report);
       return EXIT_OK;
@@ -174,9 +185,10 @@ export async function main(options: MainOptions): Promise<number> {
 /** Loads the config once, emits one warning per unknown key, builds `ctx` and runs the command. */
 async function runCommand(
   command: CommandUnit,
+  args: readonly string[],
   discovery: Discovery,
   flags: GlobalFlags,
-  { home, env, interrupts = NO_INTERRUPTS }: MainOptions,
+  { home, env, cwd, isTTY, stderr, interrupts = NO_INTERRUPTS }: MainOptions,
   out: Output,
 ): Promise<Report> {
   // A folder that is not a codebase has no codebase levels, so only the user level loads.
@@ -197,15 +209,22 @@ async function runCommand(
   const ctx: Ctx = {
     out: { emit: (event) => out.emit(event) },
     fs: createFs(),
-    git: createGit({ interactive: flags.interactive, env }),
+    // git's own output (clone) goes to stderr, so stdout keeps only the Report (AD-4).
+    git: createGit({
+      interactive: flags.interactive,
+      env,
+      stderr,
+      progress: isTTY.stderr,
+    }),
     config: configView(config),
     discovery,
+    cwd,
     interactive: flags.interactive,
     lock: { path: lockPath(discovery), adapter: createLock() },
     interrupts,
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
   };
-  return command.run(ctx);
+  return command.run(ctx, args);
 }
 
 /** The merged config as commands see it: the loaded config plus `repos` in config order. */
@@ -263,7 +282,7 @@ function checkKind(command: CommandUnit, discovery: Discovery): Discovery {
 interface ProgramHooks {
   write: (text: string) => void;
   help: (text: string) => void;
-  select: (command: CommandUnit) => void;
+  select: (command: CommandUnit, args?: readonly string[]) => void;
 }
 
 function createProgram({ write, help, select }: ProgramHooks): Command {
@@ -317,6 +336,24 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .description("print each repo of the codebase and whether it is on disk")
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseRepoList));
+  const add: Command = repo
+    .command("add")
+    .description(
+      "clone a repo into the codebase, or add a repo folder that is already in it",
+    )
+    .usage("[options] <url> [name] | <folder>")
+    // Both are optional for commander, so a missing one is our `usage` error.
+    .argument(
+      "[url|folder]",
+      "a git URL to clone, or a repo folder in the codebase",
+    )
+    .argument(
+      "[name]",
+      "the repo name for a URL; default: the last part of the URL",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseRepoAdd, add.args));
   return program;
 }
 

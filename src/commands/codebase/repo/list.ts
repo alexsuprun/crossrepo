@@ -1,4 +1,4 @@
-import type { CommandUnit } from "../../../domain/ctx.ts";
+import { type CommandUnit, codebaseDir } from "../../../domain/ctx.ts";
 import { ADD_HINT } from "../../../domain/hints.ts";
 import type { Block } from "../../../domain/report.ts";
 import { repoStates } from "../../../services/repos.ts";
@@ -8,8 +8,7 @@ export const codebaseRepoList: CommandUnit = {
   accepts: ["codebase", "project"],
   async run(ctx) {
     const { discovery } = ctx;
-    const codebase =
-      "codebase" in discovery ? discovery.codebase : discovery.dir;
+    const codebase = codebaseDir(discovery);
     const repos = repoStates(ctx, codebase);
     const table: Block = {
       type: "table",

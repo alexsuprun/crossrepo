@@ -135,3 +135,26 @@ describe("createFs folders", () => {
     expect(createFs().exists(join(dir, "web"))).toBe(false);
   });
 });
+
+describe("createFs realpath", () => {
+  test("gives the absolute path with . and .. resolved", () => {
+    mkdirSync(join(dir, "api"));
+    expect(createFs().realpath(join(dir, "api", "..", "api", "."))).toBe(
+      join(dir, "api"),
+    );
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "follows a symlink to its target",
+    () => {
+      const real = join(iso.root, "elsewhere");
+      mkdirSync(real);
+      symlinkSync(real, join(dir, "link"));
+      expect(createFs().realpath(join(dir, "link"))).toBe(real);
+    },
+  );
+
+  test("a missing path throws", () => {
+    expect(() => createFs().realpath(join(dir, "missing"))).toThrow();
+  });
+});

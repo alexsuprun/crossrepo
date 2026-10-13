@@ -9,6 +9,11 @@ export type Discovery =
   | { kind: "codebase"; dir: string; codebase: string }
   | { kind: "project"; dir: string; codebase: string };
 
+/** The codebase folder: the codebase of a project, else the folder itself. */
+export function codebaseDir(discovery: Discovery): string {
+  return "codebase" in discovery ? discovery.codebase : discovery.dir;
+}
+
 export type ConfigSource = { kind: "file"; path: string } | { kind: "default" };
 
 /** One merged leaf key in dotted form. A hook list is one entry. */
@@ -50,6 +55,8 @@ export interface CtxFs {
   /** The names of the folders directly in `path`, sorted. Symlinks are left out. */
   listDirs(path: string): string[];
   exists(path: string): boolean;
+  /** The absolute path with every symlink resolved. Throws when the path is missing. */
+  realpath(path: string): string;
 }
 
 /** Options of every git call. An aborted `signal` stops git. */
@@ -67,6 +74,8 @@ export interface CtxGit {
     dir: string,
     options?: GitCallOptions,
   ): Promise<string | undefined>;
+  /** `git clone -- <url> <dest>`, with the URL as given. git's output goes to stderr. */
+  clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
 }
 
 /** The PID lock adapter. Only the runners take it. */
@@ -82,6 +91,8 @@ export interface Ctx {
   git: CtxGit;
   config: ConfigView;
   discovery: Discovery;
+  /** The folder where `xr` runs. Only for resolving path arguments; discovery uses `discovery`. */
+  cwd: string;
   /** stdin and stdout are a TTY, and neither `--json` nor `--no-interactive` is given. */
   interactive: boolean;
   /** `path` is `<codebase>/.crossrepo/xr.lock`, resolved by `cli` (AD-7). */
@@ -119,5 +130,6 @@ export interface CommandUnit {
   accepts: readonly DiscoveryKind[];
   /** The error for a folder kind not in `accepts`. Without it, `cli` gives `not-a-codebase`. */
   refuse?(discovery: Discovery, fs: CtxFs): XrError;
-  run(ctx: Ctx): Promise<Report>;
+  /** `args` are the positional arguments of the command, as given. */
+  run(ctx: Ctx, args: readonly string[]): Promise<Report>;
 }

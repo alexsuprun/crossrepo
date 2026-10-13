@@ -38,6 +38,8 @@ describe("ERROR_CODES", () => {
       "already-a-codebase",
       "inside-a-project",
       "lock-held",
+      "not-in-codebase",
+      "repo-exists",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);
