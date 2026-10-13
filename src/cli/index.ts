@@ -4,12 +4,14 @@ import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
+import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
   type Discovery,
   discover,
+  type LoadedConfig,
   loadConfig,
 } from "../config/index.ts";
 import {
@@ -196,7 +198,7 @@ async function runCommand(
     out: { emit: (event) => out.emit(event) },
     fs: createFs(),
     git: createGit({ interactive: flags.interactive, env }),
-    config,
+    config: configView(config),
     discovery,
     interactive: flags.interactive,
     lock: { path: lockPath(discovery), adapter: createLock() },
@@ -204,6 +206,26 @@ async function runCommand(
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
   };
   return command.run(ctx);
+}
+
+/** The merged config as commands see it: the loaded config plus `repos` in config order. */
+export function configView({
+  codebase,
+  entries,
+  projectsDir,
+  values,
+}: LoadedConfig): Ctx["config"] {
+  return {
+    codebase,
+    entries,
+    projectsDir,
+    repos: Object.entries(values.repos ?? {}).map(([name, repo]) => ({
+      name,
+      remote: repo.remote,
+      defaultBranch: repo["default-branch"],
+      description: repo.description,
+    })),
+  };
 }
 
 /** `<codebase>/.crossrepo/xr.lock`; a folder that is not a codebase yet uses its own `.crossrepo/`. */
@@ -285,6 +307,16 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .description("make this folder a codebase of the git repos in it")
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseInit));
+  const repo: Command = codebase
+    .command("repo")
+    .description("manage the repos of the codebase")
+    .helpOption("-h, --help", "print this help")
+    .action(() => help(repo.helpInformation()));
+  repo
+    .command("list")
+    .description("print each repo of the codebase and whether it is on disk")
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseRepoList));
   return program;
 }
 

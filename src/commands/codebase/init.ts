@@ -1,13 +1,12 @@
 import { join } from "node:path";
 import type { CommandUnit } from "../../domain/ctx.ts";
+import { ADD_HINT } from "../../domain/hints.ts";
 import { XrError } from "../../errors/index.ts";
 import { transaction } from "../../runners/transaction.ts";
 import {
   checkRepos,
   writeCodebaseFiles,
 } from "../../services/codebase-init.ts";
-
-const ADD_HINT = "xr codebase repo add <url>|<folder>";
 
 /** `xr codebase init`: makes the current folder a codebase of the repos in it (CAP-1). */
 export const codebaseInit: CommandUnit = {

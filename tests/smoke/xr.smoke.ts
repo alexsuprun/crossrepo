@@ -138,6 +138,54 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     }
   });
 
+  test("codebase repo list --json lists the repos with present", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(codebase, { api: {} });
+      writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        `repos:\n  api:\n    remote: ${remotes.api}\n    default-branch: main\n  web:\n    remote: /o/web.git\n`,
+      );
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "repo", "list", "--json"],
+        {
+          encoding: "utf8",
+          cwd: codebase,
+          // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+          env: { ...process.env },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        entries: [
+          {
+            repo: "api",
+            remote: remotes.api,
+            defaultBranch: "main",
+            description: "",
+            present: true,
+          },
+          {
+            repo: "web",
+            remote: "/o/web.git",
+            defaultBranch: "",
+            description: "",
+            present: false,
+          },
+        ],
+        notes: ["Clone the missing repos with `xr codebase clone`."],
+      });
+    } finally {
+      iso.restore();
+    }
+  });
+
   test.skipIf(process.platform === "win32")(
     "a real SIGINT during codebase init undoes it and exits 130",
     async () => {
