@@ -6,6 +6,7 @@ export const ERROR_CODES = [
   "unknown-config-key",
   "config-conflict",
   "invalid-config",
+  "file-busy",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

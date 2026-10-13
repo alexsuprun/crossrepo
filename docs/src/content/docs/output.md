@@ -90,6 +90,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `not-a-codebase` | The folder is not a codebase or a project, or the project's `codebase` path is not a codebase. Use `--codebase-path <path>`. |
 | `config-conflict` | One config level has both a `.yaml` and a `.yml` file. |
 | `invalid-config` | A config file is not valid YAML, or a value has the wrong type. |
+| `file-busy` | `xr` could not write a file because another program is using it (Windows only). Close that program and run the command again. |
 
 Warning codes, in `warnings`:
 

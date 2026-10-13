@@ -13,3 +13,4 @@ export {
   type UnknownKey,
 } from "./load.ts";
 export type { ConfigValues } from "./schema.ts";
+export { writeFileAtomic } from "./write.ts";
