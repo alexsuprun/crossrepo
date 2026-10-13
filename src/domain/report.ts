@@ -5,6 +5,9 @@ export type Tone = "ok" | "warn" | "error" | "muted";
 /** A path shows relative to the codebase or `~` in text modes; a code shows as a command. */
 export type Text = string | { path: string } | { code: string };
 
+/** A `table` cell. In text modes `true` shows as `✓` and `false` as `–`; JSON keeps the boolean. */
+export type Cell = Text | boolean;
+
 export type RepoStatus = "ok" | "skipped" | "failed" | "conflict";
 
 export interface FieldItem {
@@ -19,7 +22,7 @@ export type Block =
   | { type: "value"; key: string; value: Text }
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
-  | { type: "table"; key: string; items: Record<string, Text>[] }
+  | { type: "table"; key: string; items: Record<string, Cell>[] }
   | {
       type: "repos";
       items: { repo: string; status: RepoStatus; message?: Text }[];

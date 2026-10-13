@@ -26,6 +26,16 @@ export interface ConfigView {
   codebase?: string;
   entries: ConfigEntry[];
   projectsDir: { value: string; source: ConfigSource; resolved: string };
+  /** The merged `repos`, in config order. A key that is not set is `undefined`. */
+  repos: ConfigRepoView[];
+}
+
+/** One merged entry of `repos`. */
+export interface ConfigRepoView {
+  name: string;
+  remote?: string;
+  defaultBranch?: string;
+  description?: string;
 }
 
 /** File and folder I/O. Every write goes through `writeFileAtomic`. */

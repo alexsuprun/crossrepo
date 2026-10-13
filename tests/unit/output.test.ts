@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, sep } from "node:path";
+import { styleText } from "node:util";
 import {
   type Block,
   createOutput,
@@ -597,5 +598,50 @@ describe("table, note and leftovers blocks in text mode", () => {
     expect(written.stderr).toBe(
       "error: m\n\n.crossrepo folder: .crossrepo\n  rm -r .crossrepo\n",
     );
+  });
+});
+
+const present: Block = {
+  type: "table",
+  key: "entries",
+  items: [
+    { repo: "api", present: true },
+    { repo: "website", present: false },
+  ],
+};
+
+describe("boolean table cells", () => {
+  test("stay booleans in JSON", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [present] });
+    expect(JSON.parse(written.stdout).entries).toEqual([
+      { repo: "api", present: true },
+      { repo: "website", present: false },
+    ]);
+  });
+
+  test("print true as ✓ and false as – in plain mode", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [present] });
+    expect(written.stdout).toBe("api      ✓\nwebsite  –\n");
+  });
+
+  test("are padded like text and painted ok and muted in rich mode", () => {
+    const { out, written } = capture("rich");
+    out.report({
+      blocks: [
+        {
+          type: "table",
+          key: "t",
+          items: [
+            { present: true, repo: "api" },
+            { present: false, repo: "web" },
+          ],
+        },
+      ],
+    });
+    const ok = styleText("green", "✓", { validateStream: false });
+    const muted = styleText("dim", "–", { validateStream: false });
+    expect(written.stdout).toBe(`${ok}  api\n${muted}  web\n`);
   });
 });

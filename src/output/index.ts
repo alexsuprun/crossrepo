@@ -52,6 +52,9 @@ export interface Warning {
  */
 export type Text = string | { path: string } | { code: string };
 
+/** A `table` cell. In text modes `true` shows as `✓` and `false` as `–`; JSON keeps the boolean. */
+export type Cell = Text | boolean;
+
 export type RepoStatus = "ok" | "skipped" | "failed" | "conflict";
 
 export interface FieldItem {
@@ -67,7 +70,7 @@ export type Block =
   | { type: "value"; key: string; value: Text }
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
-  | { type: "table"; key: string; items: Record<string, Text>[] }
+  | { type: "table"; key: string; items: Record<string, Cell>[] }
   | {
       type: "repos";
       items: { repo: string; status: RepoStatus; message?: Text }[];
@@ -258,7 +261,7 @@ function blockData(block: Block): [string, unknown] {
         })),
       ];
     case "table":
-      return [block.key, block.items.map((item) => mapValues(item, jsonText))];
+      return [block.key, block.items.map((item) => mapValues(item, jsonCell))];
     case "leftovers":
       return [
         "leftovers",
@@ -285,6 +288,10 @@ function mapValues<T, U>(
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => [key, map(value)]),
   );
+}
+
+function jsonCell(cell: Cell): string | boolean {
+  return typeof cell === "boolean" ? cell : jsonText(cell);
 }
 
 function jsonText(text: Text): string {
@@ -337,7 +344,7 @@ function renderBlock(
     case "fields":
       return renderFields(block.items, paint, show);
     case "table":
-      return renderTable(block.items, show);
+      return renderTable(block.items, paint, show);
     case "note":
       return paint(block.tone, show(block.text));
     case "leftovers":
@@ -385,26 +392,44 @@ function renderFields(
     .join("\n");
 }
 
-/** One row per record, columns padded to the widest cell; the last column is not padded. */
+/**
+ * One row per record, columns padded to the widest cell; the last column is not padded.
+ * Boolean cells show as `✓`/`–`, painted in rich mode; padding is measured on the unpainted text.
+ */
 function renderTable(
-  items: readonly Record<string, Text>[],
+  items: readonly Record<string, Cell>[],
+  paint: Paint,
   show: (text: Text) => string,
 ): string {
-  const rows = items.map((item) => Object.values(item).map(show));
+  const rows = items.map((item) =>
+    Object.values(item).map((cell) => showCell(cell, show)),
+  );
   const widths = rows.reduce<number[]>(
     (max, row) =>
-      row.map((cell, index) => Math.max(max[index] ?? 0, cell.length)),
+      row.map((cell, index) => Math.max(max[index] ?? 0, cell.text.length)),
     [],
   );
   return rows
     .map((row) =>
       row
-        .map((cell, index) =>
-          index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0),
-        )
+        .map(({ text, tone }, index) => {
+          const shown = tone ? paint(tone, text) : text;
+          return index === row.length - 1
+            ? shown
+            : shown + " ".repeat((widths[index] ?? 0) - text.length);
+        })
         .join("  "),
     )
     .join("\n");
+}
+
+function showCell(
+  cell: Cell,
+  show: (text: Text) => string,
+): { text: string; tone?: Tone } {
+  if (cell === true) return { text: SYMBOL.ok, tone: "ok" };
+  if (cell === false) return { text: SYMBOL.skipped, tone: "muted" };
+  return { text: show(cell) };
 }
 
 function envelope(

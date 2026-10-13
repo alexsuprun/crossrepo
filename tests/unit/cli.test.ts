@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Command } from "commander";
-import { main, readGlobalFlags, toXrError } from "../../src/cli/index.ts";
+import {
+  configView,
+  main,
+  readGlobalFlags,
+  toXrError,
+} from "../../src/cli/index.ts";
 import { ConfigError } from "../../src/config/index.ts";
 import { XrError } from "../../src/errors/index.ts";
 
@@ -115,10 +120,37 @@ describe("main", () => {
     expect(result.stdout).toContain("show");
   });
 
+  test("codebase help lists the repo group", async () => {
+    const result = await run(["codebase", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/^ {2}repo\b/m);
+  });
+
+  test("codebase repo with no subcommand prints its help with list and exits 0", async () => {
+    for (const argv of [
+      ["codebase", "repo"],
+      ["codebase", "repo", "--help"],
+    ]) {
+      const result = await run(argv);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Usage: xr codebase repo");
+      expect(result.stdout).toContain("list");
+    }
+  });
+
+  test("codebase repo list --help prints its own usage", async () => {
+    const result = await run(["codebase", "repo", "list", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Usage: xr codebase repo list");
+  });
+
   test("an unknown subcommand or argument is a usage error", async () => {
     for (const argv of [
       ["config", "nope"],
       ["config", "show", "x"],
+      ["codebase", "repo", "nope"],
+      ["codebase", "repo", "list", "x"],
     ]) {
       const result = await run(argv);
       expect(result.code).toBe(2);
@@ -377,5 +409,43 @@ describe("toXrError", () => {
     const error = toXrError("boom");
     expect(error.code).toBe("internal");
     expect(error.message).toBe("boom");
+  });
+});
+
+describe("configView", () => {
+  const base = {
+    codebase: "/c",
+    entries: [],
+    projectsDir: {
+      value: ".projects",
+      source: { kind: "default" as const },
+      resolved: "/c/.projects",
+    },
+    unknownKeys: [],
+  };
+
+  test("lists the merged repos in config order with camelCase fields", () => {
+    const view = configView({
+      ...base,
+      values: {
+        repos: {
+          web: { remote: "w", "default-branch": "trunk", description: "site" },
+          api: { remote: "a" },
+        },
+      },
+    });
+    expect(view.repos).toEqual([
+      { name: "web", remote: "w", defaultBranch: "trunk", description: "site" },
+      { name: "api", remote: "a" },
+    ]);
+  });
+
+  test("no repos key gives an empty list, and the other fields stay", () => {
+    expect(configView({ ...base, values: {} })).toEqual({
+      codebase: "/c",
+      entries: [],
+      projectsDir: base.projectsDir,
+      repos: [],
+    });
   });
 });
