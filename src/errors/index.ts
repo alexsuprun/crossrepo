@@ -17,6 +17,10 @@ export const ERROR_CODES = [
   "stale-lock",
   "not-in-codebase",
   "repo-exists",
+  "repo-not-found",
+  "repo-in-use",
+  "invalid-project-record",
+  "would-lose-work",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

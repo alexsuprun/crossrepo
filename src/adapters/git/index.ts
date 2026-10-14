@@ -22,6 +22,20 @@ export interface Git {
    * to the `stderr` option as it comes; a failure is a `GitError` with its end.
    */
   clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
+  /**
+   * What a delete of the repo at `dir` would lose (D45). Reads only: it never
+   * changes the repo, not even the index.
+   */
+  lossCheck(dir: string, options?: GitCallOptions): Promise<Loss>;
+}
+
+/** Work that is only in one repo folder. */
+export interface Loss {
+  /** Changed, staged and untracked files that are not ignored, as git gives them. */
+  uncommitted: string[];
+  /** Local branches with commits that are on no remote, by branch name. */
+  unpushed: { branch: string; count: number }[];
+  stashes: number;
 }
 
 export interface CreateGitOptions {
@@ -65,7 +79,14 @@ export function createGit({
       execFile(
         "git",
         args,
-        { env: gitEnv, encoding: "utf8", windowsHide: true, signal },
+        // `status -z` of a repo with many untracked files passes the 1 MB default.
+        {
+          env: gitEnv,
+          encoding: "utf8",
+          windowsHide: true,
+          signal,
+          maxBuffer: Number.POSITIVE_INFINITY,
+        },
         (error, stdout, stderr) => {
           if (!error) {
             resolve({ exitCode: 0, stdout, stderr });
@@ -159,6 +180,17 @@ export function createGit({
     throw new GitError({ args, exitCode, stderr });
   }
 
+  /** Runs git after the version check and gives stdout; any exit but 0 is a `GitError`. */
+  async function output(
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    await checkVersion();
+    const { exitCode, stdout, stderr } = await exec(args, signal);
+    if (exitCode !== 0) throw new GitError({ args, exitCode, stderr });
+    return stdout;
+  }
+
   return {
     version: checkVersion,
     async originUrl(dir, options) {
@@ -197,7 +229,69 @@ export function createGit({
         throw new GitError({ args, exitCode, stderr: cloneErrors(text) });
       }
     },
+    async lossCheck(dir, options) {
+      const signal = options?.signal;
+      const args = (rest: string[]) => [
+        // `--no-optional-locks`: status must not refresh and rewrite the index.
+        "--no-optional-locks",
+        "-C",
+        dir,
+        ...rest,
+      ];
+      const git = (...rest: string[]) => output(args(rest), signal);
+      const count = async (...rest: string[]) =>
+        Number((await git("rev-list", "--count", ...rest, "--")).trim());
+      // The flags win over repo config that hides untracked files or submodule changes.
+      const status = await git(
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+      );
+      const unpushed: Loss["unpushed"] = [];
+      const refs = await git(
+        "for-each-ref",
+        "--format=%(refname)",
+        "refs/heads",
+      );
+      for (const ref of lines(refs)) {
+        const n = await count(ref, "--not", "--remotes");
+        if (n > 0) {
+          unpushed.push({ branch: ref.slice("refs/heads/".length), count: n });
+        }
+      }
+      const head = args(["rev-parse", "--verify", "--quiet", "HEAD"]);
+      const { exitCode, stderr } = await exec(head, signal);
+      if (exitCode !== 0 && exitCode !== 1) {
+        throw new GitError({ args: head, exitCode, stderr });
+      }
+      // Exit 1: an unborn HEAD, with no commits to lose.
+      if (exitCode === 0) {
+        const n = await count("HEAD", "--not", "--branches", "--remotes");
+        if (n > 0) unpushed.push({ branch: "HEAD", count: n });
+      }
+      const stashes = lines(await git("stash", "list")).length;
+      return { uncommitted: statusPaths(status), unpushed, stashes };
+    },
   };
+}
+
+function lines(text: string): string[] {
+  return text.split(/\r?\n/).filter(Boolean);
+}
+
+/** The paths of `git status --porcelain=v1 -z`. A rename or copy (`R` or `C` in X or Y) has its old path next; it is skipped. */
+function statusPaths(output: string): string[] {
+  const entries = output.split("\0");
+  const paths: string[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index] as string;
+    if (entry.length < 4) continue;
+    paths.push(entry.slice(3));
+    if (/[RC]/.test(entry.slice(0, 2))) index += 1;
+  }
+  return paths;
 }
 
 /** A progress update, such as `Receiving objects:  45% (9/20)`, maybe after `remote: `. */

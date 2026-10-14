@@ -67,7 +67,8 @@ export interface FieldItem {
 
 /** What a part of the Report is, never how it looks. The set is closed (AD-3). */
 export type Block =
-  | { type: "value"; key: string; value: Text }
+  /** A boolean or a number prints as `<key>: <value>` in text modes; JSON keeps its type. */
+  | { type: "value"; key: string; value: Text | boolean | number }
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
   | { type: "table"; key: string; items: Record<string, Cell>[] }
@@ -88,7 +89,9 @@ export interface ReportError {
   code: string;
   message: string;
   hint?: string;
-  /** Their data is `error.details` in JSON. */
+  /** Plain data for `error.details` in JSON. Text modes do not print it. */
+  details?: Record<string, unknown>;
+  /** Their data is `error.details` in JSON, next to `details`. */
   blocks?: Block[];
 }
 
@@ -195,7 +198,7 @@ export function createOutput({
     },
     report({ blocks, error }) {
       const data = blocksData(blocks, true);
-      const details = error?.blocks ? blocksData(error.blocks, false) : {};
+      const details = error ? errorDetails(error) : {};
       if (modes.stdout === "json") {
         stdout(`${JSON.stringify(envelope(warnings, data, error, details))}\n`);
         return;
@@ -216,6 +219,20 @@ export function createOutput({
 }
 
 type Paint = (tone: Tone, text: string) => string;
+
+/** `error.details`: the plain details and the data of the error blocks. Throws on a key clash. */
+function errorDetails({
+  details = {},
+  blocks = [],
+}: ReportError): Record<string, unknown> {
+  const data = blocksData(blocks, false);
+  for (const key of Object.keys(details)) {
+    if (Object.hasOwn(data, key)) {
+      throw new Error(`The error has the key "${key}" twice.`);
+    }
+  }
+  return { ...details, ...data };
+}
 
 /** The JSON data of `blocks`. Throws on a key clash, which is a bug in the command. */
 function blocksData(
@@ -249,7 +266,7 @@ function blocksData(
 function blockData(block: Block): [string, unknown] {
   switch (block.type) {
     case "value":
-      return [block.key, jsonText(block.value)];
+      return [block.key, jsonCell(block.value)];
     case "fields":
       return [
         block.key,
@@ -290,8 +307,10 @@ function mapValues<T, U>(
   );
 }
 
-function jsonCell(cell: Cell): string | boolean {
-  return typeof cell === "boolean" ? cell : jsonText(cell);
+function jsonCell(cell: Text | boolean | number): string | boolean | number {
+  return typeof cell === "boolean" || typeof cell === "number"
+    ? cell
+    : jsonText(cell);
 }
 
 function jsonText(text: Text): string {
@@ -340,7 +359,9 @@ function renderBlock(
 ): string {
   switch (block.type) {
     case "value":
-      return show(block.value).replace(/\n$/, "");
+      return typeof block.value === "boolean" || typeof block.value === "number"
+        ? `${block.key}: ${block.value}`
+        : show(block.value).replace(/\n$/, "");
     case "fields":
       return renderFields(block.items, paint, show);
     case "table":
@@ -448,7 +469,7 @@ function envelope(
       code,
       message,
       hint,
-      details: error.blocks?.length ? details : undefined,
+      details: Object.keys(details).length ? details : undefined,
     },
   };
 }

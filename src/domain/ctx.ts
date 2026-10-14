@@ -50,13 +50,15 @@ export interface CtxFs {
   writeText(path: string, text: string): void;
   /** Makes one folder. Fails when it exists or its parent is missing. */
   mkdir(path: string): void;
-  /** Deletes a file or a whole folder. A missing path is not an error. */
+  /** Deletes a file or a whole folder, also read-only files. A missing path is not an error. */
   remove(path: string): void;
   /** The names of the folders directly in `path`, sorted. Symlinks are left out. */
   listDirs(path: string): string[];
   exists(path: string): boolean;
   /** The absolute path with every symlink resolved. Throws when the path is missing. */
   realpath(path: string): string;
+  /** The device and inode of the path, symlinks followed, or `undefined` when it is missing. */
+  stat(path: string): { dev: bigint; ino: bigint } | undefined;
 }
 
 /** Options of every git call. An aborted `signal` stops git. */
@@ -76,6 +78,15 @@ export interface CtxGit {
   ): Promise<string | undefined>;
   /** `git clone -- <url> <dest>`, with the URL as given. git's output goes to stderr. */
   clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
+  /** Uncommitted and untracked files, unpushed commits per local branch, and stashes. Reads only. */
+  lossCheck(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<{
+    uncommitted: string[];
+    unpushed: { branch: string; count: number }[];
+    stashes: number;
+  }>;
 }
 
 /** The PID lock adapter. Only the runners take it. */
@@ -110,19 +121,25 @@ export interface Leftover {
   command: string;
 }
 
+/** One step of a delete phase: no undo, never aborted. */
+export interface FinalStep {
+  label: string;
+  run: () => unknown;
+  manualCleanup: Leftover;
+}
+
 /** A plain copy of the `transaction` runner's `tx`, which services may not import. */
 export interface Tx {
+  /** Aborts on the first Ctrl-C. */
+  readonly signal: AbortSignal;
   step<T>(
     label: string,
     run: (signal: AbortSignal) => T | Promise<T>,
     undo: (result: T) => void | Promise<void>,
     manualCleanup: Leftover,
   ): Promise<T>;
-  final<T>(
-    label: string,
-    run: () => T | Promise<T>,
-    manualCleanup: Leftover,
-  ): Promise<T>;
+  /** Runs the steps in order; a failed or stopped phase lists the failed step and every step not run. */
+  finals(steps: readonly FinalStep[]): Promise<void>;
 }
 
 /** One `xr` command. `cli` checks the folder kind before `run`. */
@@ -130,6 +147,10 @@ export interface CommandUnit {
   accepts: readonly DiscoveryKind[];
   /** The error for a folder kind not in `accepts`. Without it, `cli` gives `not-a-codebase`. */
   refuse?(discovery: Discovery, fs: CtxFs): XrError;
-  /** `args` are the positional arguments of the command, as given. */
-  run(ctx: Ctx, args: readonly string[]): Promise<Report>;
+  /** `args` are the positional arguments of the command, as given; `options` its own flags, camelCase. */
+  run(
+    ctx: Ctx,
+    args: readonly string[],
+    options?: Readonly<Record<string, unknown>>,
+  ): Promise<Report>;
 }

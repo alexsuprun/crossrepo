@@ -19,7 +19,7 @@ export interface FieldItem {
 
 /** What a part of the Report is, never how it looks (AD-3). */
 export type Block =
-  | { type: "value"; key: string; value: Text }
+  | { type: "value"; key: string; value: Text | boolean | number }
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
   | { type: "table"; key: string; items: Record<string, Cell>[] }
@@ -37,7 +37,13 @@ export type Block =
 
 export interface Report {
   blocks: Block[];
-  error?: { code: string; message: string; hint?: string; blocks?: Block[] };
+  error?: {
+    code: string;
+    message: string;
+    hint?: string;
+    details?: Record<string, unknown>;
+    blocks?: Block[];
+  };
 }
 
 export interface Warning {

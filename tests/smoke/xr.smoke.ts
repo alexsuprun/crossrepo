@@ -190,6 +190,41 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     }
   });
 
+  test("codebase repo remove --json removes the entry and deletes the clean folder", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(codebase, { api: {} });
+      const config = writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        `# keep me\nrepos:\n  api:\n    remote: ${remotes.api}\n    default-branch: main\n`,
+      );
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "repo", "remove", "api", "--json"],
+        {
+          encoding: "utf8",
+          cwd: codebase,
+          // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+          env: { ...process.env },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        removed: "api",
+        folderDeleted: true,
+      });
+      expect(readFileSync(config, "utf8")).toBe("# keep me\nrepos: {}\n");
+      expect(existsSync(join(codebase, "api"))).toBe(false);
+      expect(existsSync(join(codebase, ".crossrepo", "xr.lock"))).toBe(false);
+    } finally {
+      iso.restore();
+    }
+  });
+
   test.skipIf(process.platform === "win32")(
     "a real SIGINT during codebase init undoes it and exits 130",
     async () => {

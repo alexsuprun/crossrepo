@@ -37,7 +37,16 @@ export interface TransactionOptions {
   lock?: "start" | "after-first-step";
 }
 
+/** One step of a delete phase. */
+export interface FinalStep {
+  label: string;
+  run: () => unknown;
+  manualCleanup: Leftover;
+}
+
 export interface Tx {
+  /** Aborts on the first Ctrl-C, so work outside the steps, such as checks, can stop git. */
+  readonly signal: AbortSignal;
   /**
    * Runs `run` between a step-start and a step-end event. Its `undo` is kept
    * only when `run` succeeds, and gets the result of `run`. `signal` aborts on Ctrl-C.
@@ -49,14 +58,12 @@ export interface Tx {
     manualCleanup: Leftover,
   ): Promise<T>;
   /**
-   * A step with no undo, for the delete phase of a remove. It is never aborted.
-   * When it fails, its `manualCleanup` is a leftover.
+   * The delete phase of a remove (AD-17): steps with no undo, never aborted, run
+   * in order. When a step
+   * fails, or Ctrl-C stops the phase after a step, that step (when it failed)
+   * and every step not run are leftovers.
    */
-  final<T>(
-    label: string,
-    run: () => T | Promise<T>,
-    manualCleanup: Leftover,
-  ): Promise<T>;
+  finals(steps: readonly FinalStep[]): Promise<void>;
 }
 
 interface Undo {
@@ -85,6 +92,8 @@ export async function transaction<T>(
   const leftovers: Leftover[] = [];
   let pending: Undo[] | undefined;
   let inFlight: Leftover | undefined;
+  /** The final steps not started yet, once a `finals` phase has started. */
+  let queued: Leftover[] = [];
   let stepsDone = 0;
   let interrupts = 0;
   let abandoned = false;
@@ -115,6 +124,7 @@ export async function transaction<T>(
         [
           ...(inFlight && !pending ? [inFlight] : []),
           ...leftovers,
+          ...queued,
           ...notDone.map(({ cleanup }) => cleanup),
         ],
       ),
@@ -152,11 +162,12 @@ export async function transaction<T>(
     }
   }
 
+  /** `onFailure` are the leftovers when `run` throws. */
   async function runStep<R>(
     label: string,
     run: () => R | Promise<R>,
     manualCleanup: Leftover,
-    final: boolean,
+    onFailure: readonly Leftover[],
   ): Promise<R> {
     await checkpoint();
     ctx.out.emit({ type: "step-start", text: label });
@@ -165,7 +176,7 @@ export async function transaction<T>(
       return await run();
     } catch (error) {
       ctx.out.emit({ type: "step-end", text: label, ok: false });
-      if (final) leftovers.push(manualCleanup);
+      leftovers.push(...onFailure);
       throw interrupts > 0 ? interrupted() : error;
     } finally {
       inFlight = undefined;
@@ -173,12 +184,13 @@ export async function transaction<T>(
   }
 
   const tx: Tx = {
+    signal: controller.signal,
     async step(label, run, undo, manualCleanup) {
       const result = await runStep(
         label,
         () => run(controller.signal),
         manualCleanup,
-        false,
+        [],
       );
       undos.push({
         index: stepsDone,
@@ -189,11 +201,31 @@ export async function transaction<T>(
       await afterStep();
       return result;
     },
-    async final(label, run, manualCleanup) {
-      const result = await runStep(label, () => run(), manualCleanup, true);
-      ctx.out.emit({ type: "step-end", text: label, ok: true });
-      await afterStep();
-      return result;
+    async finals(steps) {
+      for (const [index, { label, run, manualCleanup }] of steps.entries()) {
+        const rest = steps.slice(index).map((step) => step.manualCleanup);
+        let started = false;
+        try {
+          await runStep(
+            label,
+            () => {
+              started = true;
+              queued = rest.slice(1);
+              return run();
+            },
+            manualCleanup,
+            rest,
+          );
+        } catch (error) {
+          // Stopped by Ctrl-C between two steps: this step and the rest never ran.
+          if (!started && index > 0) leftovers.push(...rest);
+          queued = [];
+          throw error;
+        }
+        ctx.out.emit({ type: "step-end", text: label, ok: true });
+        await afterStep();
+      }
+      queued = [];
     },
   };
 
@@ -217,7 +249,8 @@ export async function transaction<T>(
     try {
       if (lockAt === "start") takeLock();
       const result = await body(tx);
-      if (interrupts > 0) throw interrupted();
+      // With nothing to undo, a Ctrl-C during the last step changes nothing more.
+      if (interrupts > 0 && undos.length > 0) throw interrupted();
       return result;
     } catch (error) {
       throw await undoAll(error);
