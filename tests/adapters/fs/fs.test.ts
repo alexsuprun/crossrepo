@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,6 +11,7 @@ import {
 import { join } from "node:path";
 import { createFs } from "../../../src/adapters/fs/index.ts";
 import { XrError } from "../../../src/errors/index.ts";
+import { git, makeRepos } from "../../helpers/git.ts";
 import { type Isolation, isolate, writeFile } from "../../helpers/isolate.ts";
 
 let iso: Isolation;
@@ -156,5 +158,79 @@ describe("createFs realpath", () => {
 
   test("a missing path throws", () => {
     expect(() => createFs().realpath(join(dir, "missing"))).toThrow();
+  });
+});
+
+describe("createFs remove of read-only files", () => {
+  test("deletes a git repo with its read-only object files (runs on Windows CI)", () => {
+    makeRepos(dir, { api: {} });
+    const repo = join(dir, "api");
+    writeFile(join(repo, "a.txt"), "x");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "--quiet", "-m", "a");
+    chmodSync(join(repo, "a.txt"), 0o444);
+    createFs().remove(repo);
+    expect(existsSync(repo)).toBe(false);
+  });
+
+  test("makes the files writable and tries again when the delete fails with EPERM or EACCES", () => {
+    const folder = join(dir, "api");
+    const file = writeFile(join(folder, "objects", "ab"), "x");
+    chmodSync(file, 0o444);
+    for (const code of ["EPERM", "EACCES"]) {
+      const real = fs.rmSync;
+      let calls = 0;
+      const spy = spyOn(fs, "rmSync").mockImplementation((path, options) => {
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error(`${code}: rm`), { code });
+        }
+        real(path, options);
+      });
+      try {
+        createFs().remove(folder);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(calls).toBe(2);
+      expect(existsSync(folder)).toBe(false);
+      writeFile(file, "x");
+      chmodSync(file, 0o444);
+    }
+  });
+
+  test("another delete error is thrown as it is", () => {
+    const spy = spyOn(fs, "rmSync").mockImplementation(() => {
+      throw Object.assign(new Error("EIO: rm"), { code: "EIO" });
+    });
+    try {
+      expect(() => createFs().remove(join(dir, "x"))).toThrow("EIO");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("createFs stat", () => {
+  test("gives dev and ino as bigint, the same for a folder and a path to it", () => {
+    mkdirSync(join(dir, "api"));
+    const a = createFs().stat(join(dir, "api"));
+    const b = createFs().stat(join(dir, "api", "..", "api"));
+    expect(typeof a?.dev).toBe("bigint");
+    expect(typeof a?.ino).toBe("bigint");
+    expect(b).toEqual(a as { dev: bigint; ino: bigint });
+    expect(createFs().stat(dir)).not.toEqual(a as { dev: bigint; ino: bigint });
+  });
+
+  test.skipIf(process.platform === "win32")("follows a symlink", () => {
+    mkdirSync(join(dir, "api"));
+    symlinkSync(join(dir, "api"), join(dir, "link"));
+    expect(createFs().stat(join(dir, "link"))).toEqual(
+      createFs().stat(join(dir, "api")) as { dev: bigint; ino: bigint },
+    );
+  });
+
+  test("a missing path gives undefined", () => {
+    expect(createFs().stat(join(dir, "missing"))).toBeUndefined();
   });
 });

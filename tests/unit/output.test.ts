@@ -645,3 +645,85 @@ describe("boolean table cells", () => {
     expect(written.stdout).toBe(`${ok}  api\n${muted}  web\n`);
   });
 });
+
+describe("boolean and number values", () => {
+  const blocks: Block[] = [
+    { type: "value", key: "removed", value: "api" },
+    { type: "value", key: "folderDeleted", value: true },
+    { type: "value", key: "count", value: 3 },
+  ];
+
+  test("stay a boolean and a number in JSON", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks });
+    expect(written.stdout).toBe(
+      '{"ok":true,"warnings":[],"removed":"api","folderDeleted":true,"count":3}\n',
+    );
+  });
+
+  test("print with their key in text modes, since the value alone says little", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks });
+    expect(written.stdout).toBe("api\n\nfolderDeleted: true\n\ncount: 3\n");
+  });
+});
+
+describe("error details", () => {
+  test("plain details are error.details in JSON", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [],
+      error: {
+        code: "would-lose-work",
+        message: "m",
+        details: { uncommitted: ["a.txt"], stashes: 1 },
+      },
+    });
+    expect(JSON.parse(written.stdout).error).toEqual({
+      code: "would-lose-work",
+      message: "m",
+      details: { uncommitted: ["a.txt"], stashes: 1 },
+    });
+  });
+
+  test("sit next to the data of the error blocks", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [],
+      error: {
+        code: "x",
+        message: "m",
+        details: { projects: ["feat"] },
+        blocks: [{ type: "value", key: "failed", value: "api" }],
+      },
+    });
+    expect(JSON.parse(written.stdout).error.details).toEqual({
+      projects: ["feat"],
+      failed: "api",
+    });
+  });
+
+  test("a key in both the details and an error block throws", () => {
+    const { out } = capture("json");
+    expect(() =>
+      out.report({
+        blocks: [],
+        error: {
+          code: "x",
+          message: "m",
+          details: { failed: "web" },
+          blocks: [{ type: "value", key: "failed", value: "api" }],
+        },
+      }),
+    ).toThrow("failed");
+  });
+
+  test("empty details are left out", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [], error: { code: "x", message: "m", details: {} } });
+    expect(JSON.parse(written.stdout).error).toEqual({
+      code: "x",
+      message: "m",
+    });
+  });
+});

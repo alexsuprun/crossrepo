@@ -632,83 +632,172 @@ describe("transaction Ctrl-C during undo", () => {
   });
 });
 
-describe("tx.final", () => {
-  test("runs with no undo and no signal, between start and end events", async () => {
+describe("tx.finals", () => {
+  const steps = (log: string[], fail?: string, onRun?: () => void) =>
+    ["x", "y", "z"].map((name) => ({
+      label: `Do ${name}`,
+      run: () => {
+        if (name === fail) throw new Error(`${name} failed`);
+        log.push(name);
+        if (name === "x") onRun?.();
+      },
+      manualCleanup: cleanup(name),
+    }));
+
+  test("runs the steps in order, each between start and end events", async () => {
     const { ctx, log, events } = recorder();
-    const result = await transaction(ctx, async (tx) => {
-      return tx.final(
-        "Remove x",
-        (...args: unknown[]) => {
-          log.push(`final args ${args.length}`);
-          return 7;
+    await transaction(ctx, (tx) => tx.finals(steps(log)));
+    expect(log.slice(1)).toEqual(["x", "y", "z", "release"]);
+    expect(events).toEqual(
+      ["x", "y", "z"].flatMap((name) => [
+        { type: "step-start", text: `Do ${name}` },
+        { type: "step-end", text: `Do ${name}`, ok: true },
+      ]),
+    );
+  });
+
+  test("a step runs with no arguments: it gets no signal", async () => {
+    const { ctx, log } = recorder();
+    await transaction(ctx, (tx) =>
+      tx.finals([
+        {
+          label: "Do x",
+          run: (...args: unknown[]) => void log.push(`args ${args.length}`),
+          manualCleanup: cleanup("x"),
         },
-        cleanup("x"),
-      );
+      ]),
+    );
+    expect(log.slice(1)).toEqual(["args 0", "release"]);
+  });
+
+  test("Ctrl-C in the last step: every step is done, so the body result is given", async () => {
+    const { ctx, log, interrupts } = recorder();
+    const result = await transaction(ctx, async (tx) => {
+      await tx.finals([
+        ...steps(log).slice(0, 2),
+        {
+          label: "Do z",
+          run: () => {
+            interrupts.fire();
+            log.push("z");
+          },
+          manualCleanup: cleanup("z"),
+        },
+      ]);
+      return "done";
     });
-    expect(result).toBe(7);
-    expect(log.slice(1)).toEqual(["final args 0", "release"]);
-    expect(events).toEqual([
-      { type: "step-start", text: "Remove x" },
-      { type: "step-end", text: "Remove x", ok: true },
+    expect(result).toBe("done");
+    expect(log.slice(1)).toEqual(["x", "y", "z", "release"]);
+  });
+
+  test("lock after-first-step counts a step", async () => {
+    const { ctx, log } = recorder();
+    await transaction(ctx, (tx) => tx.finals(steps(log)), {
+      lock: "after-first-step",
+    });
+    expect(log).toEqual([
+      "x",
+      "lock /c/.crossrepo/xr.lock",
+      "y",
+      "z",
+      "release",
     ]);
   });
 
-  test("a failed final step stops and lists its cleanup as a leftover", async () => {
-    const { ctx, log } = recorder();
-    const boom = new XrError({ code: "git-failed", message: "boom" });
+  test("a failed step stops: it and every step after it are leftovers", async () => {
+    const { ctx, log, events } = recorder();
     const error = await failure(
-      transaction(ctx, async (tx) => {
-        await tx.final("x", () => void log.push("x"), cleanup("x"));
-        await tx.final(
-          "y",
-          () => {
-            throw boom;
-          },
-          cleanup("y"),
-        );
-        await tx.final("z", () => void log.push("z"), cleanup("z"));
-      }),
+      transaction(ctx, (tx) => tx.finals(steps(log, "y"))),
     );
-    expect(error).toBe(boom);
+    expect(error.code).toBe("internal");
+    expect(error.message).toBe("y failed");
     expect(log.slice(1)).toEqual(["x", "release"]);
     expect(error.blocks).toEqual([
-      { type: "leftovers", items: [leftover("y")] },
+      { type: "leftovers", items: [leftover("y"), leftover("z")] },
     ]);
+    expect(events).toContainEqual({
+      type: "step-end",
+      text: "Do y",
+      ok: false,
+    });
   });
 
-  test("Ctrl-C in a final step: it ends, then no new step starts", async () => {
+  test("Ctrl-C in a step: the step ends, then the steps not run are leftovers, exit 130", async () => {
     const { ctx, log, interrupts } = recorder();
     const error = await failure(
-      transaction(ctx, async (tx) => {
-        await tx.final(
-          "x",
-          async () => {
-            interrupts.fire();
-            await new Promise((resolve) => setTimeout(resolve, 5));
-            log.push("x done");
-          },
-          cleanup("x"),
-        );
-        await tx.final("y", () => void log.push("y"), cleanup("y"));
-      }),
+      transaction(ctx, (tx) =>
+        tx.finals(steps(log, undefined, () => interrupts.fire())),
+      ),
     );
     expect(error.code).toBe("interrupted");
     expect(exitCodeFor(error)).toBe(130);
-    expect(log.slice(1)).toEqual(["x done", "release"]);
+    expect(log.slice(1)).toEqual(["x", "release"]);
+    expect(error.blocks).toEqual([
+      { type: "leftovers", items: [leftover("y"), leftover("z")] },
+    ]);
+  });
+
+  test("Ctrl-C before the first step: nothing ran, so no leftovers", async () => {
+    const { ctx, log, interrupts } = recorder();
+    const error = await failure(
+      transaction(ctx, async (tx) => {
+        interrupts.fire();
+        await tx.finals(steps(log));
+      }),
+    );
+    expect(error.code).toBe("interrupted");
+    expect(log.slice(1)).toEqual(["release"]);
     expect(error.blocks).toBeUndefined();
   });
 
-  test("lock after-first-step counts a final step", async () => {
-    const { ctx, log } = recorder();
-    await transaction(
-      ctx,
-      async (tx) => {
-        await tx.final("x", () => void log.push("x"), cleanup("x"));
-        await tx.final("y", () => void log.push("y"), cleanup("y"));
-      },
-      { lock: "after-first-step" },
+  test("a second Ctrl-C in a step fails at once with that step and the steps not run", async () => {
+    const { ctx, log, interrupts } = recorder();
+    let finish: () => void = () => {};
+    const error = await failure(
+      transaction(ctx, (tx) =>
+        tx.finals([
+          {
+            label: "Do x",
+            run: () =>
+              new Promise<void>((resolve) => {
+                finish = resolve;
+                interrupts.fire();
+                interrupts.fire();
+              }),
+            manualCleanup: cleanup("x"),
+          },
+          ...steps(log).slice(1),
+        ]),
+      ),
     );
-    expect(log).toEqual(["x", "lock /c/.crossrepo/xr.lock", "y", "release"]);
+    finish();
+    expect(error.code).toBe("interrupted");
+    expect(error.blocks).toEqual([
+      {
+        type: "leftovers",
+        items: [leftover("x"), leftover("y"), leftover("z")],
+      },
+    ]);
+    expect(log).toEqual(["lock /c/.crossrepo/xr.lock"]);
+  });
+});
+
+describe("tx.signal", () => {
+  test("aborts on Ctrl-C, so work before the steps can stop git", async () => {
+    const { ctx, interrupts } = recorder();
+    const seen: boolean[] = [];
+    const error = await failure(
+      transaction(ctx, async (tx) => {
+        seen.push(tx.signal.aborted);
+        const wait = untilAborted(tx.signal);
+        interrupts.fire();
+        seen.push(tx.signal.aborted);
+        await wait;
+      }),
+    );
+    expect(seen).toEqual([false, true]);
+    expect(error.code).toBe("interrupted");
+    expect(error.blocks).toBeUndefined();
   });
 });
 

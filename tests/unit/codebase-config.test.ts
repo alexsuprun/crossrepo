@@ -4,6 +4,7 @@ import {
   addRepoEntry,
   codebaseConfigName,
   codebaseRepos,
+  removeRepoEntry,
   renderCodebaseConfig,
   repoKeys,
 } from "../../src/domain/codebase-config.ts";
@@ -170,6 +171,86 @@ projects-dir: .p
   test("repos that is not a map is invalid-config", () => {
     expect(() => addRepoEntry("repos: [a]\n", NEW)).toThrow(XrError);
     expect(() => addRepoEntry("repos: [\n", NEW)).toThrow(XrError);
+  });
+});
+
+describe("removeRepoEntry", () => {
+  test("removes the last entry of the init config: repos: {} and the rest stays", () => {
+    const text = renderCodebaseConfig([
+      { name: "api", remote: "/o/api.git", defaultBranch: "main" },
+    ]);
+    expect(removeRepoEntry(text, "api")).toBe(renderCodebaseConfig([]));
+  });
+
+  test("a hand-edited config loses only the entry and its own comments (pinned)", () => {
+    expect(removeRepoEntry(HAND_EDITED, "web")).toBe(`# top comment
+name: shop # inline comment
+repos:
+  # the api
+  api:
+    remote: git@github.com:acme/api.git # inline remote
+    default-branch: main
+    description: >
+      A long folded text
+# between
+projects-dir: .p
+
+# end comment
+`);
+  });
+
+  test("a comment above the first entry stays, since it may be about all repos (pinned)", () => {
+    expect(removeRepoEntry(HAND_EDITED, "api")).toBe(`# top comment
+name: shop # inline comment
+repos:
+  # the api
+  web:
+    remote: "https://example.com/web.git"
+    default-branch: trunk
+    description: ''
+# between
+projects-dir: .p
+
+# end comment
+`);
+  });
+
+  test("an emptied map is repos: {}, with a comment above the first entry moved above repos (pinned)", () => {
+    const once = removeRepoEntry(HAND_EDITED, "api");
+    expect(removeRepoEntry(once, "web")).toBe(`# top comment
+name: shop # inline comment
+# the api
+repos: {}
+# between
+projects-dir: .p
+
+# end comment
+`);
+  });
+
+  test("removes a key with a null value", () => {
+    expect(removeRepoEntry("repos:\n  api:\n  web: ~\n", "api")).toBe(
+      "repos:\n  web: ~\n",
+    );
+    expect(removeRepoEntry("repos:\n  api:\n", "api")).toBe("repos: {}\n");
+  });
+
+  test("matches the key as written, so 1.0 is not 1", () => {
+    expect(removeRepoEntry("repos:\n  1.0:\n  '1': ~\n", "1")).toBe(
+      "repos:\n  1.0:\n",
+    );
+    expect(removeRepoEntry("repos:\n  1.0:\n  '1': ~\n", "1.0")).toBe(
+      "repos:\n  '1': ~\n",
+    );
+  });
+
+  test("a name that is not a key gives the text unchanged", () => {
+    expect(removeRepoEntry(HAND_EDITED, "nope")).toBe(HAND_EDITED);
+    expect(removeRepoEntry("name: x\n", "api")).toBe("name: x\n");
+  });
+
+  test("repos that is not a map is invalid-config", () => {
+    expect(() => removeRepoEntry("repos: [a]\n", "a")).toThrow(XrError);
   });
 });
 

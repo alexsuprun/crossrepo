@@ -6,6 +6,7 @@ import { createLock } from "../adapters/lock/index.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
+import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
 import { configShow } from "../commands/config/show.ts";
 import {
   CODEBASE_PATH_HINT,
@@ -80,6 +81,8 @@ interface Parsed {
   command?: CommandUnit;
   /** The positional arguments of `command`. */
   args?: readonly string[];
+  /** The own options of `command`, as commander gives them. */
+  options?: Readonly<Record<string, unknown>>;
 }
 
 /** Runs the `xr` CLI on `argv` (without the node and script paths) and returns the exit code. */
@@ -93,9 +96,10 @@ export async function main(options: MainOptions): Promise<number> {
     help: (text) => {
       parsed.report = helpReport(text);
     },
-    select: (command, args = []) => {
+    select: (command, args = [], options = {}) => {
       parsed.command = command;
       parsed.args = args;
+      parsed.options = options;
     },
   });
 
@@ -153,6 +157,7 @@ export async function main(options: MainOptions): Promise<number> {
           ? await runCommand(
               parsed.command,
               parsed.args ?? [],
+              parsed.options ?? {},
               discovery,
               flags,
               options,
@@ -168,13 +173,14 @@ export async function main(options: MainOptions): Promise<number> {
   if (flags.verbose && failure.error.code === "internal") {
     out.trace(stackOf(failure.thrown));
   }
-  const { code, message, hint, blocks } = failure.error;
+  const { code, message, hint, details, blocks } = failure.error;
   out.report({
     blocks: [],
     error: {
       code,
       message,
       hint: hint ?? (code === "internal" ? BUG_HINT : undefined),
+      details,
       // `errors` types its blocks loosely, since it may not import the Report types.
       blocks: blocks as Block[] | undefined,
     },
@@ -186,6 +192,7 @@ export async function main(options: MainOptions): Promise<number> {
 async function runCommand(
   command: CommandUnit,
   args: readonly string[],
+  options: Readonly<Record<string, unknown>>,
   discovery: Discovery,
   flags: GlobalFlags,
   { home, env, cwd, isTTY, stderr, interrupts = NO_INTERRUPTS }: MainOptions,
@@ -224,7 +231,7 @@ async function runCommand(
     interrupts,
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
   };
-  return command.run(ctx, args);
+  return command.run(ctx, args, options);
 }
 
 /** The merged config as commands see it: the loaded config plus `repos` in config order. */
@@ -282,7 +289,11 @@ function checkKind(command: CommandUnit, discovery: Discovery): Discovery {
 interface ProgramHooks {
   write: (text: string) => void;
   help: (text: string) => void;
-  select: (command: CommandUnit, args?: readonly string[]) => void;
+  select: (
+    command: CommandUnit,
+    args?: readonly string[],
+    options?: Readonly<Record<string, unknown>>,
+  ) => void;
 }
 
 function createProgram({ write, help, select }: ProgramHooks): Command {
@@ -354,6 +365,21 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseRepoAdd, add.args));
+  const remove: Command = repo
+    .command("remove")
+    .description(
+      "remove a repo from the codebase config and AGENTS.md, and delete its folder",
+    )
+    // Optional for commander, so a missing name is our `usage` error.
+    .argument("[name]", "the name of the repo in the codebase config")
+    .option("--keep-folder", "keep the repo folder; remove only the entry")
+    .option(
+      "--force",
+      "delete the folder even when it has work that is not pushed",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseRepoRemove, remove.args, remove.opts()));
   return program;
 }
 

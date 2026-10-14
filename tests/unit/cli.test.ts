@@ -317,6 +317,27 @@ describe("main on a crash", () => {
     expect(JSON.parse(verbose.stdout).error.code).toBe("internal");
   });
 
+  test("XrError details are error.details in JSON, next to the error block data", async () => {
+    helpInformation = spyOn(
+      Command.prototype,
+      "helpInformation",
+    ).mockImplementation(() => {
+      throw new XrError({
+        code: "repo-in-use",
+        message: "in use",
+        details: { projects: ["feat"] },
+        blocks: [{ type: "value", key: "repo", value: "api" }],
+      });
+    });
+    const result = await run(["--json"]);
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error).toEqual({
+      code: "repo-in-use",
+      message: "in use",
+      details: { projects: ["feat"], repo: "api" },
+    });
+  });
+
   test("a thrown non-error under --verbose prints it as the trace", async () => {
     helpInformation = spyOn(
       Command.prototype,

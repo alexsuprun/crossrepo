@@ -1,4 +1,11 @@
-import { type Document, isMap, isScalar, parseDocument, stringify } from "yaml";
+import {
+  type Document,
+  isMap,
+  isPair,
+  isScalar,
+  parseDocument,
+  stringify,
+} from "yaml";
 import { XrError } from "../errors/index.ts";
 
 /** One repo of a new codebase config. */
@@ -72,7 +79,7 @@ export function codebaseRepos(
   return repos.items.map(({ key, value }) => {
     const description = isMap(value) ? value.get("description") : undefined;
     return {
-      name: isScalar(key) ? (key.source ?? String(key.value)) : String(key),
+      name: keyName(key),
       description: typeof description === "string" ? description : undefined,
     };
   });
@@ -109,6 +116,43 @@ export function addRepoEntry(text: string, repo: ConfigRepo): string {
     }),
   );
   return doc.toString();
+}
+
+/**
+ * Removes the `repos:` entry whose key is `name` as written (also a key with a
+ * null value) with the `yaml` round trip and default `toString()` (AD-2). The
+ * entry's own comments go with it; a comment above the first entry stays.
+ * An emptied map is `repos: {}`. A name that is not a key gives `text` unchanged.
+ */
+export function removeRepoEntry(text: string, name: string): string {
+  const doc = load(text);
+  const repos = reposNode(doc);
+  const index = repos?.items.findIndex(({ key }) => keyName(key) === name);
+  if (!repos || index === undefined || index < 0) return text;
+  repos.items.splice(index, 1);
+  if (repos.items.length === 0) {
+    repos.flow = true;
+    // A comment above the old first entry would print between `repos:` and `{}`.
+    if (repos.commentBefore) {
+      const pair = isMap(doc.contents)
+        ? doc.contents.items.find(
+            (item) => isPair(item) && keyName(item.key) === "repos",
+          )
+        : undefined;
+      if (pair && isScalar(pair.key)) {
+        pair.key.commentBefore = [pair.key.commentBefore, repos.commentBefore]
+          .filter(Boolean)
+          .join("\n");
+        repos.commentBefore = undefined;
+      }
+    }
+  }
+  return doc.toString();
+}
+
+/** A YAML key or scalar as written, so `1.0` stays `1.0`. */
+export function keyName(key: unknown): string {
+  return isScalar(key) ? (key.source ?? String(key.value)) : String(key);
 }
 
 function load(text: string): Document {

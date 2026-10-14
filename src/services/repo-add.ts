@@ -91,8 +91,8 @@ function usage(message: string): XrError {
   return new XrError({ code: "usage", message, hint: USAGE_HINT });
 }
 
-/** The codebase config file in its own spelling. */
-function configPath(fs: Ctx["fs"], codebase: string): string {
+/** The codebase config file in its own spelling: `config.yaml`, or `config.yml` when only it exists. */
+export function codebaseConfigPath(fs: Ctx["fs"], codebase: string): string {
   const folder = join(codebase, ".crossrepo");
   return join(
     folder,
@@ -113,7 +113,7 @@ export async function addRepo(
 ): Promise<AddedRepo> {
   const { fs } = ctx;
   const { name } = source;
-  const file = configPath(fs, codebase);
+  const file = codebaseConfigPath(fs, codebase);
   const oldConfig = fs.readText(file);
   const target = join(codebase, name);
   checkFree(ctx, oldConfig ?? "", source, target);

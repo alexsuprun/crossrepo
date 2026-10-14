@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createGit, parseVersion } from "../../../src/adapters/git/index.ts";
@@ -152,6 +160,201 @@ describe("createGit clone", () => {
       .clone("file:///x.git", join(iso.root, "x"))
       .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(GitError);
+  });
+});
+
+const CLEAN = { uncommitted: [], unpushed: [], stashes: 0 };
+
+describe("createGit lossCheck", () => {
+  test("a clean repo with every branch pushed loses nothing", async () => {
+    makeRepos(root, { api: {} });
+    const adapter = createGit({ interactive: false, env: env() });
+    expect(await adapter.lossCheck(join(root, "api"))).toEqual(CLEAN);
+  });
+
+  test("lists changed, staged, renamed and untracked files, but not ignored ones", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    writeFile(join(repo, ".gitignore"), "*.log\n");
+    writeFile(join(repo, "old.txt"), "x");
+    writeFile(join(repo, "tracked.txt"), "x");
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "files");
+    git(repo, "push", "--quiet", "origin", "main");
+    writeFile(join(repo, "tracked.txt"), "changed");
+    git(repo, "mv", "old.txt", "new name.txt");
+    writeFile(join(repo, "staged.txt"), "x");
+    git(repo, "add", "staged.txt");
+    writeFile(join(repo, "notes ü.md"), "x");
+    writeFile(join(repo, "debug.log"), "x");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect([...result.uncommitted].sort()).toEqual([
+      "new name.txt",
+      "notes ü.md",
+      "staged.txt",
+      "tracked.txt",
+    ]);
+    expect(result.unpushed).toEqual([]);
+    expect(result.stashes).toBe(0);
+  });
+
+  test("lists each local branch with commits that are on no remote, with the count", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", "two");
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", "three");
+    git(repo, "branch", "pushed", "origin/main");
+    git(repo, "checkout", "--quiet", "-b", "feat");
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", "feat");
+    git(repo, "checkout", "--quiet", "main");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result.unpushed).toEqual([
+      { branch: "feat", count: 3 },
+      { branch: "main", count: 2 },
+    ]);
+  });
+
+  test("a repo with no remote: every commit of each branch is unpushed", async () => {
+    makeRepos(root, { solo: { origin: false } });
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(join(root, "solo"));
+    expect(result.unpushed).toEqual([{ branch: "main", count: 1 }]);
+  });
+
+  test("counts the stashes", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    const adapter = createGit({ interactive: false, env: env() });
+    writeFile(join(repo, "a.txt"), "x");
+    git(repo, "stash", "push", "--quiet", "--include-untracked");
+    expect((await adapter.lossCheck(repo)).stashes).toBe(1);
+    writeFile(join(repo, "b.txt"), "x");
+    git(repo, "stash", "push", "--quiet", "--include-untracked");
+    expect(await adapter.lossCheck(repo)).toEqual({ ...CLEAN, stashes: 2 });
+  });
+
+  test("does not change the repo: the index stays as it is", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    writeFile(join(repo, "a.txt"), "x");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "--quiet", "-m", "a");
+    // A new mtime makes a plain `git status` refresh and rewrite the index.
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(repo, "a.txt"), later, later);
+    const index = readFileSync(join(repo, ".git", "index"));
+    await createGit({ interactive: false, env: env() }).lossCheck(repo);
+    expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+  });
+
+  test("repo config that hides untracked files or submodule changes is ignored", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    git(repo, "config", "status.showUntrackedFiles", "no");
+    git(repo, "config", "diff.ignoreSubmodules", "all");
+    writeFile(join(repo, "new", "work.txt"), "x");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result.uncommitted).toEqual(["new/work.txt"]);
+  });
+
+  test("counts commits on a detached HEAD that no branch or remote has", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    git(repo, "checkout", "--quiet", "--detach");
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", "detached");
+    git(repo, "commit", "--quiet", "--allow-empty", "-m", "detached 2");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result.unpushed).toEqual([{ branch: "HEAD", count: 2 }]);
+  });
+
+  test("an unborn HEAD with no commits loses nothing", async () => {
+    const repo = join(root, "fresh");
+    mkdirSync(repo);
+    git(repo, "init", "--quiet");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result).toEqual(CLEAN);
+  });
+
+  test("a file named like a branch does not confuse rev-list", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    git(repo, "branch", "feat");
+    writeFile(join(repo, "refs", "heads", "feat"), "x");
+    writeFile(join(repo, "feat"), "x");
+    writeFile(join(repo, "HEAD"), "x");
+    git(repo, "add", ".");
+    git(repo, "commit", "--quiet", "-m", "files");
+    git(repo, "push", "--quiet", "origin", "main", "feat");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result).toEqual(CLEAN);
+  });
+
+  test("a worktree rename (Y column R) lists the new path only", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    writeFile(join(repo, "a.txt"), "hello world content\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "--quiet", "-m", "a");
+    git(repo, "push", "--quiet", "origin", "main");
+    renameSync(join(repo, "a.txt"), join(repo, "c.txt"));
+    git(repo, "add", "--intent-to-add", "c.txt");
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result.uncommitted).toEqual(["c.txt"]);
+  });
+
+  test("many untracked files do not overflow the output buffer", async () => {
+    makeRepos(root, { api: {} });
+    const repo = join(root, "api");
+    const name = "x".repeat(200);
+    for (let n = 0; n < 6000; n += 1) {
+      writeFileSync(join(repo, `${name}-${n}`), "");
+    }
+    const result = await createGit({
+      interactive: false,
+      env: env(),
+    }).lossCheck(repo);
+    expect(result.uncommitted).toHaveLength(6000);
+  }, 30_000);
+
+  test("a folder that is not a repo fails with a GitError", async () => {
+    const dir = join(iso.root, "plain");
+    mkdirSync(dir);
+    const error = await createGit({ interactive: false, env: env() })
+      .lossCheck(dir)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
+  });
+
+  test("an aborted signal stops it: GitError with exitCode null", async () => {
+    makeRepos(root, { api: {} });
+    const error = await createGit({ interactive: false, env: env() })
+      .lossCheck(join(root, "api"), { signal: AbortSignal.abort() })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
+    expect(error).toMatchObject({ exitCode: null });
   });
 });
 
