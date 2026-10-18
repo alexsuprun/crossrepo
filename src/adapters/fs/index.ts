@@ -78,14 +78,15 @@ export function createFs(platform: NodeJS.Platform = process.platform): Fs {
       mkdirSync(path);
     },
     remove(path) {
-      try {
-        rmSync(path, RM_OPTIONS);
-      } catch (error) {
-        const code = (error as { code?: unknown }).code;
-        if (code !== "EPERM" && code !== "EACCES") throw error;
-        // Windows does not delete a read-only file, and git makes its object files read-only.
-        makeWritable(path);
-        rmSync(path, RM_OPTIONS);
+      // Bun's rmSync on macOS can stop partway without an error, so check the result.
+      for (let tries = 1; ; tries += 1) {
+        removeOnce(path);
+        if (!existsSync(path)) return;
+        if (tries === REMOVE_TRIES) {
+          throw new Error(
+            `Could not delete ${path}: it still exists after ${REMOVE_TRIES} tries.`,
+          );
+        }
       }
     },
     listDirs(path) {
@@ -105,6 +106,20 @@ export function createFs(platform: NodeJS.Platform = process.platform): Fs {
       return stats && { dev: stats.dev, ino: stats.ino };
     },
   };
+}
+
+const REMOVE_TRIES = 3;
+
+function removeOnce(path: string): void {
+  try {
+    rmSync(path, RM_OPTIONS);
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code !== "EPERM" && code !== "EACCES") throw error;
+    // Windows does not delete a read-only file, and git makes its object files read-only.
+    makeWritable(path);
+    rmSync(path, RM_OPTIONS);
+  }
 }
 
 /** Makes every file and folder under `path` writable. Symlinks are not followed. */
