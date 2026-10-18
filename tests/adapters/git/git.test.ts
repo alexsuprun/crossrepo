@@ -12,7 +12,7 @@ import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createGit, parseVersion } from "../../../src/adapters/git/index.ts";
 import { GitError, XrError } from "../../../src/errors/index.ts";
-import { git, makeRepos } from "../../helpers/git.ts";
+import { git, makeRepos, pushCommit } from "../../helpers/git.ts";
 import { type Isolation, isolate, writeFile } from "../../helpers/isolate.ts";
 
 let iso: Isolation;
@@ -160,6 +160,66 @@ describe("createGit clone", () => {
       .clone("file:///x.git", join(iso.root, "x"))
       .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(GitError);
+  });
+});
+
+describe("createGit pull", () => {
+  /** A clone of a new `api` origin in `<root>/api`, so `main` tracks `origin/main`. */
+  function cloned(): { dir: string; origin: string } {
+    const origin = makeRepos(join(iso.root, "up"), { api: {} }).api as string;
+    const dir = join(root, "api");
+    git(root, "clone", "--quiet", origin, "api");
+    return { dir, origin };
+  }
+
+  test("fast-forwards the checked-out branch and streams all git output to stderr", async () => {
+    const { dir, origin } = cloned();
+    const head = pushCommit(origin);
+    let streamed = "";
+    const adapter = createGit({
+      interactive: false,
+      env: env(),
+      stderr: (text) => {
+        streamed += text;
+      },
+    });
+    await adapter.pull(dir);
+    expect(git(dir, "rev-parse", "HEAD").trim()).toBe(head);
+    expect(git(dir, "branch", "--show-current")).toBe("main\n");
+    // git prints the fetch to stderr and the merge summary to stdout.
+    expect(streamed).toMatch(/main +-> origin\/main/);
+    expect(streamed).toContain("Fast-forward");
+    streamed = "";
+    await adapter.pull(dir);
+    expect(streamed).toContain("Already up to date.");
+  });
+
+  test("never rebases, also with pull.rebase=true: a diverged branch is a GitError and keeps its commit", async () => {
+    const { dir, origin } = cloned();
+    pushCommit(origin);
+    git(dir, "config", "pull.rebase", "true");
+    git(dir, "commit", "--quiet", "--allow-empty", "-m", "local");
+    const local = git(dir, "rev-parse", "HEAD").trim();
+    const error = await createGit({
+      interactive: false,
+      env: env(),
+      stderr: () => {},
+    })
+      .pull(dir)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
+    expect(error).toMatchObject({ code: "git-failed", exitCode: 128 });
+    expect((error as GitError).args).toEqual([
+      "-C",
+      dir,
+      "pull",
+      "--ff-only",
+      "--no-rebase",
+    ]);
+    expect((error as GitError).stderr).toContain(
+      "Not possible to fast-forward",
+    );
+    expect(git(dir, "rev-parse", "HEAD").trim()).toBe(local);
   });
 });
 
@@ -621,6 +681,111 @@ describe.skipIf(process.platform === "win32")(
         .clone("file:///o/api.git", join(root, "web"), {
           signal: AbortSignal.abort(),
         })
+        .catch((thrown: unknown) => thrown);
+      expect(early).toMatchObject({ exitCode: null });
+    });
+
+    test("pull runs `git -C <dir> pull --ff-only --no-rebase`, with --progress only when asked", async () => {
+      const fake = fakeGit("2.40.0");
+      await createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+      }).pull(join(root, "api"));
+      await createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+        progress: true,
+      }).pull(join(root, "web"));
+      const calls = readFileSync(fake.log, "utf8").trim().split("\n");
+      expect(calls).toEqual([
+        "version",
+        `-C ${join(root, "api")} pull --ff-only --no-rebase`,
+        "version",
+        `-C ${join(root, "web")} pull --ff-only --no-rebase --progress`,
+      ]);
+    });
+
+    test("pull checks the git version first", async () => {
+      const fake = fakeGit("2.26.0");
+      const error = await createGit({
+        interactive: false,
+        env: fake.env,
+        stderr: () => {},
+      })
+        .pull(join(root, "api"))
+        .catch((thrown: unknown) => thrown);
+      expect(error).toMatchObject({ code: "git-too-old" });
+    });
+
+    test("a failed pull's GitError leaves out progress lines and the fetch report", async () => {
+      const bin = join(iso.root, "noisy-bin");
+      const script = writeFile(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          "printf 'remote: Counting objects:  50%% (1/2)\\rremote: Counting objects: 100%% (2/2), done.\\n' >&2",
+          "printf 'Unpacking objects:  45%% (9/20)\\rUnpacking objects: 100%% (20/20), done.\\n' >&2",
+          "echo 'From /o/api' >&2",
+          "echo '   ab0d9f1..6b49583  main       -> origin/main' >&2",
+          "echo ' * [new branch]      feat       -> origin/feat' >&2",
+          "echo ' ! [rejected]        v1         -> v1  (would clobber existing tag)' >&2",
+          "echo 'hint: a hint' >&2",
+          "echo 'fatal: Not possible to fast-forward, aborting.' >&2",
+          "exit 128",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(script, 0o755);
+      let streamed = "";
+      const error = await createGit({
+        interactive: false,
+        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+        stderr: (text) => {
+          streamed += text;
+        },
+      })
+        .pull(join(root, "api"))
+        .catch((thrown: unknown) => thrown);
+      expect(error).toMatchObject({
+        exitCode: 128,
+        stderr:
+          " ! [rejected]        v1         -> v1  (would clobber existing tag)\nhint: a hint\nfatal: Not possible to fast-forward, aborting.",
+      });
+      expect(streamed).toContain("Unpacking objects");
+      expect(streamed).toContain("From /o/api");
+    });
+
+    test("an aborted signal stops git pull: GitError with exitCode null", async () => {
+      const bin = join(iso.root, "slow-bin");
+      const script = writeFile(
+        join(bin, "git"),
+        [
+          "#!/bin/sh",
+          'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          "echo 'From /o/api' >&2",
+          "exec sleep 10",
+          "",
+        ].join("\n"),
+      );
+      chmodSync(script, 0o755);
+      const controller = new AbortController();
+      const adapter = createGit({
+        interactive: false,
+        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+        stderr: () => controller.abort(),
+      });
+      const started = Date.now();
+      const error = await adapter
+        .pull(join(root, "api"), { signal: controller.signal })
+        .catch((thrown: unknown) => thrown);
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(error).toBeInstanceOf(GitError);
+      expect(error).toMatchObject({ code: "git-failed", exitCode: null });
+      const early = await adapter
+        .pull(join(root, "web"), { signal: AbortSignal.abort() })
         .catch((thrown: unknown) => thrown);
       expect(early).toMatchObject({ exitCode: null });
     });

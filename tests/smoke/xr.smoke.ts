@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeRepos } from "../helpers/git.ts";
+import { git, makeRepos, pushCommit } from "../helpers/git.ts";
 import { isolate, writeFile } from "../helpers/isolate.ts";
 import { smokeRuntimes } from "../helpers/smoke-runtimes.ts";
 
@@ -257,6 +257,53 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
       });
       expect(result.stderr).toContain("Cloning into");
       expect(existsSync(join(codebase, "api", ".git"))).toBe(true);
+      expect(existsSync(join(codebase, ".crossrepo", "xr.lock"))).toBe(false);
+    } finally {
+      iso.restore();
+    }
+  });
+
+  test("codebase pull --json fast-forwards the repo on disk and skips the missing one", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(join(iso.root, "upstream"), { api: {} });
+      const origin = remotes.api as string;
+      git(iso.root, "clone", "--quiet", origin, join(codebase, "api"));
+      const target = pushCommit(origin);
+      writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        `repos:\n  api:\n    remote: ${origin}\n  web:\n    remote: /o/web.git\n`,
+      );
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "pull", "--json"],
+        {
+          encoding: "utf8",
+          cwd: codebase,
+          // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+          env: { ...process.env },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        repos: [
+          { repo: "api", status: "ok" },
+          {
+            repo: "web",
+            status: "skipped",
+            message: "missing",
+            hint: "Clone the missing repos with `xr codebase clone`.",
+          },
+        ],
+      });
+      expect(result.stderr).toContain("Fast-forward");
+      expect(git(join(codebase, "api"), "rev-parse", "HEAD").trim()).toBe(
+        target,
+      );
       expect(existsSync(join(codebase, ".crossrepo", "xr.lock"))).toBe(false);
     } finally {
       iso.restore();

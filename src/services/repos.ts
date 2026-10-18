@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ConfigRepoView, Ctx } from "../domain/ctx.ts";
+import type { ConfigRepoView, Ctx, RepoResult } from "../domain/ctx.ts";
 
 /** One configured repo and what is on disk for it. */
 export interface RepoState extends ConfigRepoView {
@@ -29,5 +29,18 @@ export function repoState(
     ...repo,
     present,
     folderWithoutGit: !present && fs.exists(dir),
+  };
+}
+
+/** The `failed` result of a repo whose folder has no `.git`, with the hint to move or delete it. */
+export function folderWithoutGitResult(
+  codebase: string,
+  name: string,
+): RepoResult {
+  return {
+    repo: name,
+    status: "failed",
+    message: "folder has no .git",
+    hint: `Move or delete ${join(codebase, name)}, then run \`xr codebase clone\` again.`,
   };
 }

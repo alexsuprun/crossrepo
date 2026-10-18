@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /** How `makeRepos` sets up one repo. */
 export interface RepoSpec {
@@ -55,4 +55,29 @@ export function makeRepos(
     remotes[name] = remote;
   }
   return remotes;
+}
+
+let pushes = 0;
+
+/**
+ * Pushes one new commit to `branch` of the bare repo `origin`, made in a new
+ * clone next to it. With `file`, the commit adds or changes that file; else it
+ * is empty. Gives the hash of the new commit.
+ */
+export function pushCommit(
+  origin: string,
+  { branch = "main", file }: { branch?: string; file?: string } = {},
+): string {
+  const work = mkdtempSync(join(dirname(origin), "work-"));
+  git(work, "clone", "--quiet", "--branch", branch, origin, ".");
+  if (file) {
+    pushes += 1;
+    writeFileSync(join(work, file), `from origin ${pushes}\n`);
+    git(work, "add", "--", file);
+    git(work, "commit", "--quiet", "-m", `add ${file}`);
+  } else {
+    git(work, "commit", "--quiet", "--allow-empty", "-m", "from origin");
+  }
+  git(work, "push", "--quiet", "origin", branch);
+  return git(work, "rev-parse", "HEAD").trim();
 }

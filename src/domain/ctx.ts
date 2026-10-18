@@ -78,6 +78,8 @@ export interface CtxGit {
   ): Promise<string | undefined>;
   /** `git clone -- <url> <dest>`, with the URL as given. git's output goes to stderr. */
   clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
+  /** `git -C <dir> pull --ff-only --no-rebase` on the checked-out branch. git's output goes to stderr. */
+  pull(dir: string, options?: GitCallOptions): Promise<void>;
   /** Uncommitted and untracked files, unpushed commits per local branch, and stashes. Reads only. */
   lossCheck(
     dir: string,
