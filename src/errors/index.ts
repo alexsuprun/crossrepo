@@ -21,6 +21,7 @@ export const ERROR_CODES = [
   "repo-in-use",
   "invalid-project-record",
   "would-lose-work",
+  "repos-failed",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -46,6 +47,8 @@ export interface XrErrorInit {
   details?: Record<string, unknown>;
   /** Report blocks; their data is `error.details` in JSON. */
   blocks?: readonly ErrorBlock[];
+  /** Report blocks whose data sits at the top level of the JSON, next to `error`. */
+  report?: readonly ErrorBlock[];
   cause?: unknown;
 }
 
@@ -55,14 +58,24 @@ export class XrError extends Error {
   readonly hint?: string;
   readonly details?: Record<string, unknown>;
   blocks?: readonly ErrorBlock[];
+  report?: readonly ErrorBlock[];
 
-  constructor({ code, message, hint, details, blocks, cause }: XrErrorInit) {
+  constructor({
+    code,
+    message,
+    hint,
+    details,
+    blocks,
+    report,
+    cause,
+  }: XrErrorInit) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = "XrError";
     this.code = code;
     this.hint = hint;
     this.details = details;
     this.blocks = blocks;
+    this.report = report;
   }
 }
 

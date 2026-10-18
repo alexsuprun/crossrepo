@@ -65,6 +65,14 @@ export interface FieldItem {
   extra?: Record<string, Text>;
 }
 
+/** One repo of a per-repo command. */
+export interface RepoItem {
+  repo: string;
+  status: RepoStatus;
+  message?: Text;
+  hint?: Text;
+}
+
 /** What a part of the Report is, never how it looks. The set is closed (AD-3). */
 export type Block =
   /** A boolean or a number prints as `<key>: <value>` in text modes; JSON keeps its type. */
@@ -72,10 +80,8 @@ export type Block =
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
   | { type: "table"; key: string; items: Record<string, Cell>[] }
-  | {
-      type: "repos";
-      items: { repo: string; status: RepoStatus; message?: Text }[];
-    }
+  /** One result per repo. In text modes a line like the live `repo` event, the hint muted under it. */
+  | { type: "repos"; items: RepoItem[] }
   | { type: "checks"; items: { id: string; status: string; fix?: Text }[] }
   | {
       type: "leftovers";
@@ -99,7 +105,13 @@ export interface ReportError {
 export type LiveEvent =
   | { type: "step-start"; text: string }
   | { type: "step-end"; text: string; ok: boolean }
-  | { type: "repo"; repo: string; status: RepoStatus; message?: string }
+  | {
+      type: "repo";
+      repo: string;
+      status: RepoStatus;
+      message?: string;
+      hint?: string;
+    }
   | { type: "warning"; warning: Warning };
 
 /** The final result of a command. `ok` is true when `error` is absent. */
@@ -179,12 +191,9 @@ export function createOutput({
               : `${paint("error", SYMBOL.failed)} ${event.text}`,
           );
           break;
-        case "repo": {
-          const { symbol, tone } = REPO_LOOK[event.status];
-          const message = event.message ? `: ${event.message}` : "";
-          line(`${paint(tone, symbol)} ${event.repo}${message}`);
+        case "repo":
+          line(renderRepo(event, paint, show));
           break;
-        }
         case "warning":
           warnings.push(event.warning);
           line(`${paint("warn", SYMBOL.warning)} ${event.warning.message}`);
@@ -279,6 +288,16 @@ function blockData(block: Block): [string, unknown] {
       ];
     case "table":
       return [block.key, block.items.map((item) => mapValues(item, jsonCell))];
+    case "repos":
+      return [
+        "repos",
+        block.items.map(({ repo, status, message, hint }) => ({
+          repo,
+          status,
+          ...(message === undefined ? {} : { message: jsonText(message) }),
+          ...(hint === undefined ? {} : { hint: jsonText(hint) }),
+        })),
+      ];
     case "leftovers":
       return [
         "leftovers",
@@ -347,7 +366,11 @@ function renderBlocks(
   show: (text: Text) => string,
 ): string {
   return blocks
-    .filter((block) => block.type !== "table" || block.items.length > 0)
+    .filter(
+      (block) =>
+        (block.type !== "table" && block.type !== "repos") ||
+        block.items.length > 0,
+    )
     .map((block) => `${renderBlock(block, paint, show)}\n`)
     .join("\n");
 }
@@ -368,6 +391,10 @@ function renderBlock(
       return renderTable(block.items, paint, show);
     case "note":
       return paint(block.tone, show(block.text));
+    case "repos":
+      return block.items
+        .map((item) => renderRepo(item, paint, show))
+        .join("\n");
     case "leftovers":
       return block.items
         .map(
@@ -378,6 +405,18 @@ function renderBlock(
     default:
       return noRenderer(block);
   }
+}
+
+/** `<symbol> <repo>[: <message>]`, and the hint muted on the next line. */
+function renderRepo(
+  { repo, status, message, hint }: RepoItem,
+  paint: Paint,
+  show: (text: Text) => string,
+): string {
+  const { symbol, tone } = REPO_LOOK[status];
+  const tail = message ? `: ${show(message)}` : "";
+  const head = `${paint(tone, symbol)} ${repo}${tail}`;
+  return hint ? `${head}\n${paint("muted", `  ${show(hint)}`)}` : head;
 }
 
 function renderFields(

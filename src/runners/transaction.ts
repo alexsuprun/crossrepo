@@ -87,7 +87,6 @@ export async function transaction<T>(
   options: TransactionOptions = {},
 ): Promise<T> {
   const lockAt = options.lock ?? "start";
-  const controller = new AbortController();
   const undos: Undo[] = [];
   const leftovers: Leftover[] = [];
   let pending: Undo[] | undefined;
@@ -95,69 +94,44 @@ export async function transaction<T>(
   /** The final steps not started yet, once a `finals` phase has started. */
   let queued: Leftover[] = [];
   let stepsDone = 0;
-  let interrupts = 0;
-  let abandoned = false;
   let lock: LockHandle | undefined;
   let lockedAt = 0;
 
-  let failAtOnce: (error: XrError) => void = () => {};
-  const atOnce = new Promise<never>((_, reject) => {
-    failAtOnce = reject;
-  });
-
-  const stopListening = ctx.interrupts.on(() => {
-    interrupts += 1;
-    if (interrupts === 1) {
-      controller.abort();
-      return;
-    }
-    if (abandoned) return;
-    abandoned = true;
+  const ctrlC = listenForInterrupts(ctx.interrupts, () => {
     const notDone =
       pending ?? [...undos].reverse().map(({ cleanup }) => ({ cleanup }));
-    failAtOnce(
-      withLeftovers(
-        new XrError({
-          code: "interrupted",
-          message: "Stopped by a second Ctrl-C before the undo was done.",
-        }),
-        [
-          ...(inFlight && !pending ? [inFlight] : []),
-          ...leftovers,
-          ...queued,
-          ...notDone.map(({ cleanup }) => cleanup),
-        ],
-      ),
+    return withLeftovers(
+      new XrError({
+        code: "interrupted",
+        message: "Stopped by a second Ctrl-C before the undo was done.",
+      }),
+      [
+        ...(inFlight && !pending ? [inFlight] : []),
+        ...leftovers,
+        ...queued,
+        ...notDone.map(({ cleanup }) => cleanup),
+      ],
     );
   });
 
   function takeLock(): void {
-    lock = ctx.lock.adapter.acquire(ctx.lock.path);
+    lock = acquireLock(ctx);
     lockedAt = stepsDone;
-    if (lock.stalePid !== undefined) {
-      ctx.out.emit({
-        type: "warning",
-        warning: {
-          code: "stale-lock",
-          message: `Took over the lock of pid ${lock.stalePid}, which is not running.`,
-        },
-      });
-    }
   }
 
   /** Lets a waiting Ctrl-C run, then stops before a new step after one. */
   async function checkpoint(): Promise<void> {
     await setImmediate();
-    if (interrupts > 0) throw interrupted();
+    if (ctrlC.count > 0) throw interrupted();
   }
 
   async function afterStep(): Promise<void> {
     stepsDone += 1;
-    if (lockAt === "after-first-step" && stepsDone === 1 && interrupts === 0)
+    if (lockAt === "after-first-step" && stepsDone === 1 && ctrlC.count === 0)
       takeLock();
     if (ctx.stepDelayMs) {
       await setTimeout(ctx.stepDelayMs, undefined, {
-        signal: controller.signal,
+        signal: ctrlC.signal,
       }).catch(() => {});
     }
   }
@@ -177,18 +151,18 @@ export async function transaction<T>(
     } catch (error) {
       ctx.out.emit({ type: "step-end", text: label, ok: false });
       leftovers.push(...onFailure);
-      throw interrupts > 0 ? interrupted() : error;
+      throw ctrlC.count > 0 ? interrupted() : error;
     } finally {
       inFlight = undefined;
     }
   }
 
   const tx: Tx = {
-    signal: controller.signal,
+    signal: ctrlC.signal,
     async step(label, run, undo, manualCleanup) {
       const result = await runStep(
         label,
-        () => run(controller.signal),
+        () => run(ctrlC.signal),
         manualCleanup,
         [],
       );
@@ -231,7 +205,7 @@ export async function transaction<T>(
 
   async function undoAll(error: unknown): Promise<unknown> {
     pending = [...undos].reverse();
-    while (pending.length > 0 && !abandoned) {
+    while (pending.length > 0 && !ctrlC.abandoned) {
       const next = pending[0] as Undo;
       if (next.index < lockedAt) lock?.release();
       try {
@@ -241,7 +215,7 @@ export async function transaction<T>(
       }
       pending.shift();
     }
-    const reason = interrupts > 0 ? interrupted() : error;
+    const reason = ctrlC.count > 0 ? interrupted() : error;
     return leftovers.length === 0 ? reason : withLeftovers(reason, leftovers);
   }
 
@@ -250,31 +224,107 @@ export async function transaction<T>(
       if (lockAt === "start") takeLock();
       const result = await body(tx);
       // With nothing to undo, a Ctrl-C during the last step changes nothing more.
-      if (interrupts > 0 && undos.length > 0) throw interrupted();
+      if (ctrlC.count > 0 && undos.length > 0) throw interrupted();
       return result;
     } catch (error) {
       throw await undoAll(error);
     } finally {
-      if (!abandoned) lock?.release();
+      if (!ctrlC.abandoned) lock?.release();
     }
   })();
-  // After a second Ctrl-C nobody waits for `work`; bin.ts exits the process.
-  work.catch(() => {});
-  try {
-    return await Promise.race([work, atOnce]);
-  } finally {
-    stopListening();
-  }
+  return ctrlC.until(work);
 }
 
-function interrupted(): XrError {
+/** The Ctrl-C state of one runner call. */
+export interface InterruptListener {
+  /** Aborts on the first Ctrl-C. */
+  readonly signal: AbortSignal;
+  /** How many Ctrl-C came so far. */
+  readonly count: number;
+  /** True after the second Ctrl-C: the runner gave up and must leave the lock. */
+  readonly abandoned: boolean;
+  /**
+   * Waits for `work`, or fails at once with the second-Ctrl-C error, then stops
+   * listening. Call it once, right after `work` starts.
+   */
+  until<T>(work: Promise<T>): Promise<T>;
+}
+
+/**
+ * Makes the runner the SIGINT handler (AD-7): the first Ctrl-C aborts `signal`,
+ * the second makes `until` fail at once with the error from `onSecond`.
+ */
+export function listenForInterrupts(
+  interrupts: Interrupts,
+  onSecond: () => XrError,
+): InterruptListener {
+  const controller = new AbortController();
+  let count = 0;
+  let abandoned = false;
+  let failAtOnce: (error: XrError) => void = () => {};
+  const atOnce = new Promise<never>((_, reject) => {
+    failAtOnce = reject;
+  });
+  const stopListening = interrupts.on(() => {
+    count += 1;
+    if (count === 1) {
+      controller.abort();
+      return;
+    }
+    if (abandoned) return;
+    abandoned = true;
+    failAtOnce(onSecond());
+  });
+  return {
+    signal: controller.signal,
+    get count() {
+      return count;
+    },
+    get abandoned() {
+      return abandoned;
+    },
+    async until(work) {
+      // After a second Ctrl-C nobody waits for `work`; bin.ts exits the process.
+      work.catch(() => {});
+      try {
+        return await Promise.race([work, atOnce]);
+      } finally {
+        stopListening();
+      }
+    },
+  };
+}
+
+/** Takes the codebase lock, with a `stale-lock` warning when it took over a dead process's lock. */
+export function acquireLock(
+  ctx: Pick<TransactionCtx, "out" | "lock">,
+): LockHandle {
+  const lock = ctx.lock.adapter.acquire(ctx.lock.path);
+  if (lock.stalePid !== undefined) {
+    ctx.out.emit({
+      type: "warning",
+      warning: {
+        code: "stale-lock",
+        message: `Took over the lock of pid ${lock.stalePid}, which is not running.`,
+      },
+    });
+  }
+  return lock;
+}
+
+/** The error of a run stopped by the first Ctrl-C. */
+export function interrupted(): XrError {
   return new XrError({
     code: "interrupted",
     message: "Stopped by Ctrl-C.",
   });
 }
 
-function withLeftovers(error: unknown, items: readonly Leftover[]): XrError {
+/** Adds a `leftovers` error block to `error`. */
+export function withLeftovers(
+  error: unknown,
+  items: readonly Leftover[],
+): XrError {
   return withBlocks(error, [
     {
       type: "leftovers",

@@ -3,6 +3,7 @@ import { Command, CommanderError } from "commander";
 import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
+import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
@@ -173,15 +174,15 @@ export async function main(options: MainOptions): Promise<number> {
   if (flags.verbose && failure.error.code === "internal") {
     out.trace(stackOf(failure.thrown));
   }
-  const { code, message, hint, details, blocks } = failure.error;
+  const { code, message, hint, details, blocks, report } = failure.error;
   out.report({
-    blocks: [],
+    // `errors` types its blocks loosely, since it may not import the Report types.
+    blocks: (report ?? []) as Block[],
     error: {
       code,
       message,
       hint: hint ?? (code === "internal" ? BUG_HINT : undefined),
       details,
-      // `errors` types its blocks loosely, since it may not import the Report types.
       blocks: blocks as Block[] | undefined,
     },
   });
@@ -337,6 +338,12 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .description("make this folder a codebase of the git repos in it")
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseInit));
+  codebase
+    .command("clone")
+    .description("clone each repo of the codebase that is not on disk")
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseClone));
   const repo: Command = codebase
     .command("repo")
     .description("manage the repos of the codebase")
