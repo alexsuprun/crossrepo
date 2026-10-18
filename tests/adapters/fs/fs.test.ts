@@ -172,28 +172,23 @@ describe("createFs remove of read-only files", () => {
       git(repo, "add", "a.txt");
       git(repo, "commit", "--quiet", "-m", "a");
       chmodSync(join(repo, "a.txt"), 0o444);
-      const before = spawnSync("ps", ["-Ao", "pid,ppid,etime,command"], {
-        encoding: "utf8",
-      }).stdout;
       createFs().remove(repo);
       if (existsSync(repo)) {
-        const after = spawnSync("ps", ["-Ao", "pid,ppid,etime,command"], {
-          encoding: "utf8",
-        }).stdout;
         const left = (fs.readdirSync(repo, { recursive: true }) as string[])
           .map((name) => {
             const stats = lstatSync(join(repo, name));
             return `${stats.isDirectory() ? "d" : "f"} ${(stats.mode & 0o777).toString(8)} ${stats.mtimeMs} ${name}`;
           })
           .sort();
+        const after = spawnSync("ps", ["-Ao", "pid,ppid,etime,command"], {
+          encoding: "utf8",
+        }).stdout;
         const gitLines = (text: string) =>
           text.split("\n").filter((line) => /git/.test(line));
         console.error(
           [
             `DIAG left in ${repo} (now ${Date.now()}):`,
             ...left,
-            "DIAG git processes before remove:",
-            ...gitLines(before),
             "DIAG git processes after remove:",
             ...gitLines(after),
             "DIAG git config:",
