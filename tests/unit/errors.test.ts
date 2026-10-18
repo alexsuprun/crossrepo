@@ -44,6 +44,7 @@ describe("ERROR_CODES", () => {
       "repo-in-use",
       "invalid-project-record",
       "would-lose-work",
+      "repos-failed",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);
@@ -91,6 +92,13 @@ describe("XrError", () => {
     const blocks = [{ type: "value", key: "k", value: "v" }];
     const error = new XrError({ code: "usage", message: "x", blocks });
     expect(error.blocks).toEqual(blocks);
+  });
+
+  test("carries top-level Report blocks, which sit next to error in JSON", () => {
+    const report = [{ type: "repos", items: [] }];
+    const error = new XrError({ code: "repos-failed", message: "x", report });
+    expect(error.report).toEqual(report);
+    expect(new XrError({ code: "usage", message: "x" }).report).toBeUndefined();
   });
 });
 

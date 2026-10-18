@@ -225,6 +225,44 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     }
   });
 
+  test("codebase clone --json clones the missing repo and skips the one on disk", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(join(iso.root, "upstream"), { api: {} });
+      makeRepos(codebase, { web: { origin: false } });
+      writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        `repos:\n  web:\n    remote: /o/web.git\n  api:\n    remote: ${remotes.api}\n`,
+      );
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "clone", "--json"],
+        {
+          encoding: "utf8",
+          cwd: codebase,
+          // Bun 1.3.0 does not pass later process.env changes to a child without `env`.
+          env: { ...process.env },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        ok: true,
+        warnings: [],
+        repos: [
+          { repo: "web", status: "skipped", message: "already on disk" },
+          { repo: "api", status: "ok" },
+        ],
+      });
+      expect(result.stderr).toContain("Cloning into");
+      expect(existsSync(join(codebase, "api", ".git"))).toBe(true);
+      expect(existsSync(join(codebase, ".crossrepo", "xr.lock"))).toBe(false);
+    } finally {
+      iso.restore();
+    }
+  });
+
   test.skipIf(process.platform === "win32")(
     "a real SIGINT during codebase init undoes it and exits 130",
     async () => {

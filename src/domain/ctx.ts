@@ -142,6 +142,16 @@ export interface Tx {
   finals(steps: readonly FinalStep[]): Promise<void>;
 }
 
+/** A plain copy of the `perRepo` runner's result of one repo, which services may not import. */
+export interface RepoResult {
+  repo: string;
+  status: "ok" | "skipped" | "failed" | "conflict";
+  message?: string;
+  hint?: string;
+  /** What a stopped repo left on disk; the runner lists it as a leftover. */
+  leftover?: Leftover;
+}
+
 /** One `xr` command. `cli` checks the folder kind before `run`. */
 export interface CommandUnit {
   accepts: readonly DiscoveryKind[];

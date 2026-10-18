@@ -14,13 +14,20 @@ export function repoStates(
   ctx: Pick<Ctx, "fs" | "config">,
   codebase: string,
 ): RepoState[] {
-  return ctx.config.repos.map((repo) => {
-    const dir = join(codebase, repo.name);
-    const present = ctx.fs.exists(join(dir, ".git"));
-    return {
-      ...repo,
-      present,
-      folderWithoutGit: !present && ctx.fs.exists(dir),
-    };
-  });
+  return ctx.config.repos.map((repo) => repoState(ctx.fs, codebase, repo));
+}
+
+/** One configured repo with its state on disk now. Reads only. */
+export function repoState(
+  fs: Ctx["fs"],
+  codebase: string,
+  repo: ConfigRepoView,
+): RepoState {
+  const dir = join(codebase, repo.name);
+  const present = fs.exists(join(dir, ".git"));
+  return {
+    ...repo,
+    present,
+    folderWithoutGit: !present && fs.exists(dir),
+  };
 }

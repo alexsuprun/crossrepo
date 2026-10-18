@@ -10,6 +10,14 @@ export type Cell = Text | boolean;
 
 export type RepoStatus = "ok" | "skipped" | "failed" | "conflict";
 
+/** One repo of a per-repo command. */
+export interface RepoItem {
+  repo: string;
+  status: RepoStatus;
+  message?: Text;
+  hint?: Text;
+}
+
 export interface FieldItem {
   key: string;
   value: Text | Text[];
@@ -23,10 +31,7 @@ export type Block =
   | { type: "fields"; key: string; items: FieldItem[] }
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
   | { type: "table"; key: string; items: Record<string, Cell>[] }
-  | {
-      type: "repos";
-      items: { repo: string; status: RepoStatus; message?: Text }[];
-    }
+  | { type: "repos"; items: RepoItem[] }
   | { type: "checks"; items: { id: string; status: string; fix?: Text }[] }
   | {
       type: "leftovers";
@@ -55,5 +60,11 @@ export interface Warning {
 export type LiveEvent =
   | { type: "step-start"; text: string }
   | { type: "step-end"; text: string; ok: boolean }
-  | { type: "repo"; repo: string; status: RepoStatus; message?: string }
+  | {
+      type: "repo";
+      repo: string;
+      status: RepoStatus;
+      message?: string;
+      hint?: string;
+    }
   | { type: "warning"; warning: Warning };

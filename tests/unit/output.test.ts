@@ -112,6 +112,13 @@ describe("live events", () => {
         message: "no remote",
       });
       out.emit({ type: "repo", repo: "cli", status: "conflict" });
+      out.emit({
+        type: "repo",
+        repo: "ui",
+        status: "failed",
+        message: "folder has no .git",
+        hint: "Move or delete it.",
+      });
       expect(written.stdout).toBe("");
       expect(written.stderr).toBe(
         [
@@ -122,6 +129,8 @@ describe("live events", () => {
           "– web",
           "✗ docs: no remote",
           "! cli",
+          "✗ ui: folder has no .git",
+          "  Move or delete it.",
           "",
         ].join("\n"),
       );
@@ -325,7 +334,6 @@ describe("report keys", () => {
 
   test("block types without a renderer yet throw", () => {
     const blocks: Block[] = [
-      { type: "repos", items: [] },
       { type: "checks", items: [] },
       { type: "section", key: "s", title: "S", blocks: [] },
     ];
@@ -725,5 +733,101 @@ describe("error details", () => {
       code: "x",
       message: "m",
     });
+  });
+});
+
+const repos: Block = {
+  type: "repos",
+  items: [
+    { repo: "api", status: "ok" },
+    { repo: "web", status: "skipped", message: "already on disk" },
+    {
+      repo: "docs",
+      status: "failed",
+      message: "no remote in the config",
+      hint: { code: "xr codebase clone" },
+    },
+  ],
+};
+
+describe("repos block", () => {
+  test("JSON is a repos list; message and hint only when set", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [repos] });
+    expect(written.stdout).toBe(
+      `${JSON.stringify({
+        ok: true,
+        warnings: [],
+        repos: [
+          { repo: "api", status: "ok" },
+          { repo: "web", status: "skipped", message: "already on disk" },
+          {
+            repo: "docs",
+            status: "failed",
+            message: "no remote in the config",
+            hint: "xr codebase clone",
+          },
+        ],
+      })}\n`,
+    );
+  });
+
+  test("an empty repos block is an empty list in JSON", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [{ type: "repos", items: [] }] });
+    expect(JSON.parse(written.stdout)).toEqual({
+      ok: true,
+      warnings: [],
+      repos: [],
+    });
+  });
+
+  test("text prints one line per repo like the live event, the hint under it", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [repos] });
+    expect(written.stdout).toBe(
+      [
+        "✓ api",
+        "– web: already on disk",
+        "✗ docs: no remote in the config",
+        "  xr codebase clone",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("rich text paints the symbols", () => {
+    const { out, written } = capture("rich");
+    out.report({ blocks: [repos] });
+    expect(written.stdout).toContain(
+      styleText("green", "✓", { validateStream: false }),
+    );
+  });
+
+  test("an empty repos block prints nothing in text", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [{ type: "repos", items: [] }] });
+    expect(written).toEqual({ stdout: "", stderr: "" });
+  });
+
+  test("on a failure the repos sit next to error in JSON, and go to stderr in text", () => {
+    const failure = {
+      blocks: [repos],
+      error: { code: "repos-failed", message: "1 repo failed." },
+    };
+    const json = capture("json");
+    json.out.report(failure);
+    const data = JSON.parse(json.written.stdout);
+    expect(data.repos).toHaveLength(3);
+    expect(data.error).toEqual({
+      code: "repos-failed",
+      message: "1 repo failed.",
+    });
+    const plain = capture("plain");
+    plain.out.report(failure);
+    expect(plain.written.stdout).toBe("");
+    expect(plain.written.stderr).toEndWith(
+      "  xr codebase clone\n\nerror: 1 repo failed.\n",
+    );
   });
 });

@@ -338,6 +338,35 @@ describe("main on a crash", () => {
     });
   });
 
+  test("XrError report blocks sit next to error in JSON, and on stderr in text", async () => {
+    helpInformation = spyOn(
+      Command.prototype,
+      "helpInformation",
+    ).mockImplementation(() => {
+      throw new XrError({
+        code: "repos-failed",
+        message: "1 repo failed.",
+        report: [
+          {
+            type: "repos",
+            items: [{ repo: "api", status: "failed", message: "boom" }],
+          },
+        ],
+      });
+    });
+    const result = await run(["--json"]);
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      warnings: [],
+      repos: [{ repo: "api", status: "failed", message: "boom" }],
+      error: { code: "repos-failed", message: "1 repo failed." },
+    });
+    const text = await run([]);
+    expect(text.stdout).toBe("");
+    expect(text.stderr).toBe("✗ api: boom\n\nerror: 1 repo failed.\n");
+  });
+
   test("a thrown non-error under --verbose prints it as the trace", async () => {
     helpInformation = spyOn(
       Command.prototype,
