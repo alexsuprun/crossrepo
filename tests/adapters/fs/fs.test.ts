@@ -228,6 +228,41 @@ describe("createFs remove of read-only files", () => {
     }
   });
 
+  test("deletes again when the delete returns but the path still exists", () => {
+    const folder = join(dir, "api");
+    writeFile(join(folder, ".git", "HEAD"), "x");
+    const real = fs.rmSync;
+    let calls = 0;
+    const spy = spyOn(fs, "rmSync").mockImplementation((path, options) => {
+      calls += 1;
+      if (calls > 1) real(path, options);
+    });
+    try {
+      createFs().remove(folder);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls).toBe(2);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  test("throws when the path still exists after 3 deletes", () => {
+    const folder = join(dir, "api");
+    writeFile(join(folder, ".git", "HEAD"), "x");
+    let calls = 0;
+    const spy = spyOn(fs, "rmSync").mockImplementation(() => {
+      calls += 1;
+    });
+    try {
+      expect(() => createFs().remove(folder)).toThrow(
+        `Could not delete ${folder}: it still exists after 3 tries.`,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls).toBe(3);
+  });
+
   test("another delete error is thrown as it is", () => {
     const spy = spyOn(fs, "rmSync").mockImplementation(() => {
       throw Object.assign(new Error("EIO: rm"), { code: "EIO" });
