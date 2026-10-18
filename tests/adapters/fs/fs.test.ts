@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import {
   chmodSync,
@@ -162,16 +163,49 @@ describe("createFs realpath", () => {
 });
 
 describe("createFs remove of read-only files", () => {
-  test("deletes a git repo with its read-only object files (runs on Windows CI)", () => {
-    makeRepos(dir, { api: {} });
-    const repo = join(dir, "api");
-    writeFile(join(repo, "a.txt"), "x");
-    git(repo, "add", "a.txt");
-    git(repo, "commit", "--quiet", "-m", "a");
-    chmodSync(join(repo, "a.txt"), 0o444);
-    createFs().remove(repo);
-    expect(existsSync(repo)).toBe(false);
-  });
+  test.each(Array.from({ length: 20 }, (_, i) => i))(
+    "DIAG %i: deletes a git repo with its read-only object files (runs on Windows CI)",
+    () => {
+      makeRepos(dir, { api: {} });
+      const repo = join(dir, "api");
+      writeFile(join(repo, "a.txt"), "x");
+      git(repo, "add", "a.txt");
+      git(repo, "commit", "--quiet", "-m", "a");
+      chmodSync(join(repo, "a.txt"), 0o444);
+      const before = spawnSync("ps", ["-Ao", "pid,ppid,etime,command"], {
+        encoding: "utf8",
+      }).stdout;
+      createFs().remove(repo);
+      if (existsSync(repo)) {
+        const after = spawnSync("ps", ["-Ao", "pid,ppid,etime,command"], {
+          encoding: "utf8",
+        }).stdout;
+        const left = (fs.readdirSync(repo, { recursive: true }) as string[])
+          .map((name) => {
+            const stats = lstatSync(join(repo, name));
+            return `${stats.isDirectory() ? "d" : "f"} ${(stats.mode & 0o777).toString(8)} ${stats.mtimeMs} ${name}`;
+          })
+          .sort();
+        const gitLines = (text: string) =>
+          text.split("\n").filter((line) => /git/.test(line));
+        console.error(
+          [
+            `DIAG left in ${repo} (now ${Date.now()}):`,
+            ...left,
+            "DIAG git processes before remove:",
+            ...gitLines(before),
+            "DIAG git processes after remove:",
+            ...gitLines(after),
+            "DIAG git config:",
+            spawnSync("git", ["config", "--show-origin", "--list"], {
+              encoding: "utf8",
+            }).stdout,
+          ].join("\n"),
+        );
+      }
+      expect(existsSync(repo)).toBe(false);
+    },
+  );
 
   test("makes the files writable and tries again when the delete fails with EPERM or EACCES", () => {
     const folder = join(dir, "api");
