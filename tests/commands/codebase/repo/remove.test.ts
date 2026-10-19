@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import * as fsAdapter from "../../../../src/adapters/fs/index.ts";
 import * as gitAdapter from "../../../../src/adapters/git/index.ts";
+import * as promptAdapter from "../../../../src/adapters/prompt/index.ts";
 import { main } from "../../../../src/cli/index.ts";
 import {
   removeRepoEntry,
@@ -26,6 +27,7 @@ import {
   isolate,
   writeFile,
 } from "../../../helpers/isolate.ts";
+import { fakeKeys, fakePick } from "../../../helpers/prompt.ts";
 
 let iso: Isolation;
 let codebase: string;
@@ -72,14 +74,17 @@ function testEnv(): Record<string, string | undefined> {
   return env;
 }
 
-async function run(argv: string[], { cwd = codebase }: { cwd?: string } = {}) {
+async function run(
+  argv: string[],
+  { cwd = codebase, tty = false }: { cwd?: string; tty?: boolean } = {},
+) {
   let stdout = "";
   let stderr = "";
   const code = await main({
     version: "1.2.3",
     argv,
     env: testEnv(),
-    isTTY: { stdin: false, stdout: false, stderr: false },
+    isTTY: { stdin: tty, stdout: tty, stderr: false },
     cwd,
     home: iso.home,
     interrupts,
@@ -323,14 +328,138 @@ describe("xr codebase repo remove keys that are not a folder name", () => {
   }
 });
 
-describe("xr codebase repo remove usage", () => {
-  test("no name: usage, exit 2, before the lock", async () => {
-    writeFile(lockFile, `${process.ppid}\n`);
-    const before = state();
+describe("xr codebase repo remove with no name", () => {
+  test("in a terminal: picks from the codebase file's repos in config order, then removes", async () => {
+    writeFile(
+      configFile,
+      "repos:\n  web:\n    remote: /o/web.git\n  api:\n    remote: /o/api.git\n",
+    );
+    writeFile(
+      join(codebase, ".crossrepo", "config.local.yaml"),
+      "repos:\n  mine:\n    remote: /x/mine.git\n",
+    );
+    const requests = fakePick(spies, "web");
+    const result = await run(REMOVE, { tty: true });
+    expect(result.code).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      argument: "name",
+      message: "Pick the repo to remove",
+      choices: ["web", "api"],
+    });
+    expect(readFileSync(configFile, "utf8")).not.toContain("  web:");
+    expect(readFileSync(configFile, "utf8")).toContain("  api:");
+    expect(existsSync(join(codebase, "web"))).toBe(false);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("in a terminal: the picked name keeps the flags", async () => {
+    fakePick(spies, "web");
+    const result = await run([...REMOVE, "--keep-folder"], { tty: true });
+    expect(result.code).toBe(0);
+    expect(readFileSync(configFile, "utf8")).not.toContain("  web:");
+    expect(existsSync(join(codebase, "web", ".git"))).toBe(true);
+  });
+
+  for (const [mode, argv, tty] of [
+    ["no TTY", REMOVE, false],
+    ["--json", ["--json", ...REMOVE], true],
+    ["--no-interactive", ["--no-interactive", "--json", ...REMOVE], true],
+  ] as const) {
+    test(`${mode}: missing-argument with the choices, exit 2, before the lock`, async () => {
+      writeFile(lockFile, `${process.ppid}\n`);
+      const before = state();
+      const result = await run([...argv], { tty });
+      expect(result.code).toBe(2);
+      if (mode === "no TTY") {
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toContain(
+          "Give the name of the repo to remove. Choices: api, web.",
+        );
+        expect(result.stderr).toContain("xr codebase repo remove <name>");
+      } else {
+        expect(JSON.parse(result.stdout).error).toEqual({
+          code: "missing-argument",
+          message: "Give the name of the repo to remove. Choices: api, web.",
+          hint: "xr codebase repo remove <name>",
+          details: { argument: "name", choices: ["api", "web"] },
+        });
+      }
+      expect(state()).toEqual(before);
+    });
+  }
+
+  test("--no-interactive in text mode: missing-argument, stdout stays empty", async () => {
+    const result = await run(["--no-interactive", ...REMOVE], { tty: true });
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Choices: api, web.");
+  });
+
+  test("no repos, --json: missing-argument with no choices", async () => {
+    writeFile(configFile, renderCodebaseConfig([]));
     const result = await json(REMOVE);
     expect(result.code).toBe(2);
+    expect(result.data.error).toEqual({
+      code: "missing-argument",
+      message: "There is no repo to remove.",
+      hint: "xr codebase repo add <url>|<folder>",
+      details: { argument: "name", choices: [] },
+    });
+  });
+
+  for (const tty of [true, false]) {
+    test(`no repos, tty ${tty}: missing-argument in text mode, no picker`, async () => {
+      writeFile(configFile, renderCodebaseConfig([]));
+      fakeKeys(spies, []);
+      const text = await run(REMOVE, { tty });
+      expect(text.code).toBe(2);
+      expect(text.stdout).toBe("");
+      expect(text.stderr).toContain("There is no repo to remove.");
+    });
+  }
+
+  for (const [name, key] of [
+    ["Escape", "\x1b"],
+    ["Ctrl-C", "\x03"],
+  ] as const) {
+    test(`${name} in the picker: interrupted, exit 130, nothing changes`, async () => {
+      fakeKeys(spies, [key]);
+      const before = state();
+      const result = await run(REMOVE, { tty: true });
+      expect(result.code).toBe(130);
+      expect(result.stderr).toContain("Stopped by Ctrl-C.");
+      expect(state()).toEqual(before);
+      expect(existsSync(join(codebase, "web", ".git"))).toBe(true);
+      expect(existsSync(lockFile)).toBe(false);
+    });
+  }
+
+  test("a picker with the real adapter: Enter picks the first repo", async () => {
+    fakeKeys(spies, ["\r"]);
+    const result = await run(REMOVE, { tty: true });
+    expect(result.code).toBe(0);
+    expect(existsSync(apiDir)).toBe(false);
+  });
+
+  test("a given name never opens a picker", async () => {
+    spies.push(
+      spyOn(promptAdapter, "createPrompt").mockImplementation(() => ({
+        pick: () => Promise.reject(new Error("the picker opened")),
+      })),
+    );
+    const result = await run([...REMOVE, "web"], { tty: true });
+    expect(result.code).toBe(0);
+    expect(existsSync(join(codebase, "web"))).toBe(false);
+  });
+});
+
+describe("xr codebase repo remove usage", () => {
+  test("an empty name: usage, exit 2", async () => {
+    const before = state();
+    const result = await json([...REMOVE, ""]);
+    expect(result.code).toBe(2);
     expect(result.data.error.code).toBe("usage");
-    expect(result.data.error.hint).toContain("xr codebase repo remove --help");
     expect(state()).toEqual(before);
   });
 

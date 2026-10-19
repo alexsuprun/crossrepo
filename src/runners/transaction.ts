@@ -1,6 +1,6 @@
 import { setImmediate, setTimeout } from "node:timers/promises";
 import type { Lock, LockHandle } from "../adapters/lock/index.ts";
-import { withBlocks, XrError } from "../errors/index.ts";
+import { interrupted, withBlocks, XrError } from "../errors/index.ts";
 
 /** What a failed undo leaves behind, and the command that removes it by hand. */
 export interface Leftover {
@@ -310,14 +310,6 @@ export function acquireLock(
     });
   }
   return lock;
-}
-
-/** The error of a run stopped by the first Ctrl-C. */
-export function interrupted(): XrError {
-  return new XrError({
-    code: "interrupted",
-    message: "Stopped by Ctrl-C.",
-  });
 }
 
 /** Adds a `leftovers` error block to `error`. */

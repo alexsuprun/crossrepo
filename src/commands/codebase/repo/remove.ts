@@ -1,13 +1,14 @@
 import { type CommandUnit, codebaseDir } from "../../../domain/ctx.ts";
 import { transaction } from "../../../runners/transaction.ts";
-import { parseRemoveName, removeRepo } from "../../../services/repo-remove.ts";
+import { removeName, removeRepo } from "../../../services/repo-remove.ts";
 
-/** `xr codebase repo remove <name> [--keep-folder] [--force]`: removes one repo (D45, D60, AD-17). */
+/** `xr codebase repo remove [name] [--keep-folder] [--force]`: removes one repo (D38, D45, D60, AD-17). */
 export const codebaseRepoRemove: CommandUnit = {
   accepts: ["codebase"],
   async run(ctx, args, options = {}) {
-    const name = parseRemoveName(args);
     const codebase = codebaseDir(ctx.discovery);
+    // Before the transaction, so no lock is held while the user picks.
+    const name = await removeName(ctx, codebase, args);
     const { removed, folderDeleted } = await transaction(
       ctx,
       (tx) =>

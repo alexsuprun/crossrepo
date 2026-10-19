@@ -225,6 +225,32 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     }
   });
 
+  test("codebase repo remove --json with no name: missing-argument with the choices, exit 2", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        "repos:\n  api:\n    remote: /o/api.git\n  web:\n    remote: /o/web.git\n",
+      );
+      const result = spawnSync(
+        command,
+        [bundle, "codebase", "repo", "remove", "--json"],
+        { encoding: "utf8", cwd: codebase, env: { ...process.env } },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(2);
+      expect(JSON.parse(result.stdout).error).toEqual({
+        code: "missing-argument",
+        message: "Give the name of the repo to remove. Choices: api, web.",
+        hint: "xr codebase repo remove <name>",
+        details: { argument: "name", choices: ["api", "web"] },
+      });
+    } finally {
+      iso.restore();
+    }
+  });
+
   test("codebase clone --json clones the missing repo and skips the one on disk", () => {
     const iso = isolate();
     try {

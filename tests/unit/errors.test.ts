@@ -7,6 +7,7 @@ import {
   EXIT_USAGE,
   exitCodeFor,
   GitError,
+  interrupted,
   withBlocks,
   XrError,
 } from "../../src/errors/index.ts";
@@ -154,9 +155,25 @@ describe("withBlocks", () => {
   });
 });
 
+describe("interrupted", () => {
+  test("is the interrupted error of a run stopped by Ctrl-C", () => {
+    const error = interrupted();
+    expect(error).toBeInstanceOf(XrError);
+    expect(error.code).toBe("interrupted");
+    expect(error.message).toBe("Stopped by Ctrl-C.");
+  });
+});
+
 describe("exitCodeFor", () => {
   test("maps usage to 2", () => {
     expect(exitCodeFor(new XrError({ code: "usage", message: "x" }))).toBe(2);
+  });
+
+  test("maps missing-argument to 2", () => {
+    expect(ERROR_CODES).toContain("missing-argument");
+    expect(
+      exitCodeFor(new XrError({ code: "missing-argument", message: "x" })),
+    ).toBe(EXIT_USAGE);
   });
 
   test("maps interrupted to 130", () => {

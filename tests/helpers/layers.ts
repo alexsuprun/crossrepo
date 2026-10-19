@@ -110,6 +110,8 @@ function checkImport(
     if (NODE_IO.test(specifier) && !NODE_IO_LAYERS.has(layer)) {
       return `${layer} may not import ${specifier}`;
     }
+    if (specifier.startsWith("@clack/"))
+      return checkClack(parts, clause, specifier);
     return undefined;
   }
   const target = posix
@@ -143,6 +145,28 @@ function checkImport(
     )
   ) {
     return "adapters may import only writeFileAtomic from config";
+  }
+  return undefined;
+}
+
+/**
+ * Only `src/adapters/prompt` uses clack, and never its `spinner`, `tasks` or
+ * `block` (AD-4, AD-5). A namespace or dynamic import could reach them, so it is refused too.
+ */
+function checkClack(
+  parts: string[],
+  clause: string | undefined,
+  specifier: string,
+): string | undefined {
+  if (parts.slice(0, 3).join("/") !== "src/adapters/prompt") {
+    return `only src/adapters/prompt may import ${specifier}`;
+  }
+  if (
+    clause === undefined ||
+    clause.includes("*") ||
+    /\b(spinner|tasks|block)\b/.test(clause)
+  ) {
+    return `${specifier} may not be used for spinner, tasks or block`;
   }
   return undefined;
 }
