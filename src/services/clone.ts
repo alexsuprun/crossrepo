@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { ConfigRepoView, Ctx, RepoResult } from "../domain/ctx.ts";
 import { GitError } from "../errors/index.ts";
-import { repoState } from "./repos.ts";
+import { folderWithoutGitResult, repoState } from "./repos.ts";
 
 /** The hint of `repos-failed` for `xr codebase clone`. */
 export const CLONE_FAILED_HINT =
@@ -27,12 +27,7 @@ export function cloneMissing(
       return { repo: name, status: "skipped", message: "already on disk" };
     }
     if (state.folderWithoutGit) {
-      return {
-        repo: name,
-        status: "failed",
-        message: "folder has no .git",
-        hint: `Move or delete ${dir}, then run \`xr codebase clone\` again.`,
-      };
+      return folderWithoutGitResult(codebase, name);
     }
     if (!repo.remote) {
       return {

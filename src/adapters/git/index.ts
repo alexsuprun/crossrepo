@@ -23,6 +23,12 @@ export interface Git {
    */
   clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
   /**
+   * `git -C <dir> pull --ff-only --no-rebase` on the checked-out branch, from its
+   * upstream: it never rebases or makes a merge commit (D35). git's stderr goes
+   * to the `stderr` option as it comes; a failure is a `GitError` with its end.
+   */
+  pull(dir: string, options?: GitCallOptions): Promise<void>;
+  /**
    * What a delete of the repo at `dir` would lose (D45). Reads only: it never
    * changes the repo, not even the index.
    */
@@ -42,9 +48,9 @@ export interface CreateGitOptions {
   /** When false, git may never wait for a password or a prompt. */
   interactive: boolean;
   env: Readonly<Record<string, string | undefined>>;
-  /** Gets git's live stderr of `clone`. Default: the process stderr. */
+  /** Gets git's live stderr of `clone` and `pull`. Default: the process stderr. */
   stderr?: (text: string) => void;
-  /** Adds `--progress` to `clone`; set it only when the process stderr is a TTY. */
+  /** Adds `--progress` to `clone` and `pull`; set it only when the process stderr is a TTY. */
   progress?: boolean;
 }
 
@@ -59,7 +65,7 @@ interface Result {
   stderr: string;
 }
 
-/** The most stderr a `clone` keeps for its `GitError`, from the end. */
+/** The most stderr a `clone` or `pull` keeps for its `GitError`, from the end. */
 const KEPT_STDERR = 8192;
 
 /** Builds `ctx.git`. The first call of any method checks that git is 2.27 or newer. */
@@ -112,10 +118,14 @@ export function createGit({
     });
   }
 
-  /** Runs git with stderr streamed to `stderr`, unlike the buffered `exec`. */
+  /**
+   * Runs git with stderr streamed to `stderr`, unlike the buffered `exec`. With
+   * `showStdout`, git's stdout goes to `stderr` too, but is not kept.
+   */
   function stream(
     args: readonly string[],
     signal?: AbortSignal,
+    showStdout = false,
   ): Promise<Result> {
     return new Promise((resolve, reject) => {
       const stopped = (message: string) =>
@@ -129,10 +139,16 @@ export function createGit({
         env: gitEnv,
         windowsHide: true,
         // A TTY stdin lets git ask for a password when interactive.
-        stdio: [interactive ? "inherit" : "ignore", "ignore", "pipe"],
+        stdio: [
+          interactive ? "inherit" : "ignore",
+          showStdout ? "pipe" : "ignore",
+          "pipe",
+        ],
       });
       const abort = () => child.kill();
       signal?.addEventListener("abort", abort, { once: true });
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => stderr(chunk));
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
         stderr(chunk);
@@ -226,7 +242,35 @@ export function createGit({
       ];
       const { exitCode, stderr: text } = await stream(args, options?.signal);
       if (exitCode !== 0) {
-        throw new GitError({ args, exitCode, stderr: cloneErrors(text) });
+        throw new GitError({
+          args,
+          exitCode,
+          stderr: withoutProgress(text, /^Cloning into/),
+        });
+      }
+    },
+    async pull(dir, options) {
+      await checkVersion();
+      const args = [
+        "-C",
+        dir,
+        "pull",
+        "--ff-only",
+        "--no-rebase",
+        ...(progress ? ["--progress"] : []),
+      ];
+      // The merge summary, such as `Already up to date.`, is on git's stdout.
+      const { exitCode, stderr: text } = await stream(
+        args,
+        options?.signal,
+        true,
+      );
+      if (exitCode !== 0) {
+        throw new GitError({
+          args,
+          exitCode,
+          stderr: withoutProgress(text, FETCH_REPORT),
+        });
       }
     },
     async lossCheck(dir, options) {
@@ -297,14 +341,17 @@ function statusPaths(output: string): string[] {
 /** A progress update, such as `Receiving objects:  45% (9/20)`, maybe after `remote: `. */
 const PROGRESS = /^(remote: )?[A-Za-z ]+:\s+\d+% \(/;
 
-/** The stderr lines of a failed clone without the `Cloning into` line and progress updates. */
-function cloneErrors(stderr: string): string {
+/**
+ * A line of the fetch report: `From <url>`, or one ref update such as
+ * `   a1..b2  main -> origin/main`. A rejected ref (flag `!`) is an error, so it is kept.
+ */
+const FETCH_REPORT = /^(From | [^!] .* -> )/;
+
+/** The stderr lines that are not empty, not progress updates and not matched by `drop`. */
+function withoutProgress(stderr: string, drop: RegExp): string {
   return stderr
     .split(/\r?\n|\r/)
-    .filter(
-      (line) =>
-        line.trim() && !line.startsWith("Cloning into") && !PROGRESS.test(line),
-    )
+    .filter((line) => line.trim() && !PROGRESS.test(line) && !drop.test(line))
     .join("\n");
 }
 

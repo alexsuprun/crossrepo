@@ -5,6 +5,7 @@ import { createGit } from "../adapters/git/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
+import { codebasePull } from "../commands/codebase/pull.ts";
 import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
@@ -344,6 +345,14 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseClone));
+  codebase
+    .command("pull")
+    .description(
+      "fast-forward the checked-out branch of each repo of the codebase on disk",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebasePull));
   const repo: Command = codebase
     .command("repo")
     .description("manage the repos of the codebase")
