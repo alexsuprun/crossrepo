@@ -77,7 +77,12 @@ async function run(
   {
     cwd = codebase,
     env = testEnv(),
-  }: { cwd?: string; env?: Record<string, string | undefined> } = {},
+    tty = false,
+  }: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    tty?: boolean;
+  } = {},
 ) {
   let stdout = "";
   let stderr = "";
@@ -85,7 +90,7 @@ async function run(
     version: "1.2.3",
     argv,
     env,
-    isTTY: { stdin: false, stdout: false, stderr: false },
+    isTTY: { stdin: false, stdout: tty, stderr: tty },
     cwd,
     home: iso.home,
     interrupts,
@@ -207,6 +212,17 @@ describe("xr codebase clone", () => {
     expect(result.stdout).toBe("✓ api\n– web: already on disk\n");
     expect(result.stderr).toContain("Cloning into");
     expect(result.stderr).toEndWith("✓ api\n– web: already on disk\n");
+  });
+
+  test("text mode in a terminal: the repo lines show once, on stderr only", async () => {
+    config({ api: urls.api, web: urls.web });
+    mkdirSync(join(codebase, "api", ".git"), { recursive: true });
+    mkdirSync(join(codebase, "web", ".git"), { recursive: true });
+    const result = await run(CLONE, { tty: true });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("api");
+    expect(result.stderr).toContain("web");
   });
 
   test("a local remote wins over the codebase one, and is passed as written", async () => {

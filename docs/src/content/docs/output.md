@@ -20,7 +20,7 @@ Every command accepts these 4 flags:
 
 ## stdout and stderr
 
-Progress goes to stderr: step lines, per-repo results and warnings. Only the final result goes to stdout. So you can pipe stdout to another program and still see the progress in the terminal.
+Progress goes to stderr: step lines, per-repo results and warnings. Only the final result goes to stdout. So you can pipe stdout to another program and still see the progress in the terminal. When stdout and stderr are both the terminal, the final result leaves out the per-repo lines that stderr already showed, so no line shows twice.
 
 ## Output modes
 

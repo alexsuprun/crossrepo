@@ -135,6 +135,8 @@ export interface CreateOutputOptions {
   modes: StreamModes;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
+  /** stdout and stderr are both a terminal, so the user sees both on one screen. */
+  sameScreen?: boolean;
   /** The home folder, for `~` in text-mode paths. */
   home: string;
   /** The codebase folder, when known. Text-mode paths inside it are relative to it. */
@@ -164,10 +166,12 @@ export function createOutput({
   modes,
   stdout,
   stderr,
+  sameScreen = false,
   home,
   codebase,
 }: CreateOutputOptions): Output {
   const warnings: Warning[] = [];
+  let repoLinesShown = false;
   const painter =
     (mode: Mode) =>
     (tone: Tone, text: string): string =>
@@ -192,6 +196,7 @@ export function createOutput({
           );
           break;
         case "repo":
+          repoLinesShown = true;
           line(renderRepo(event, paint, show));
           break;
         case "warning":
@@ -212,12 +217,22 @@ export function createOutput({
         stdout(`${JSON.stringify(envelope(warnings, data, error, details))}\n`);
         return;
       }
+      // Text never shows the live repo lines a second time on the same screen.
+      const notShown = (onScreen: boolean) =>
+        repoLinesShown && onScreen
+          ? blocks.filter((block) => block.type !== "repos")
+          : blocks;
       if (!error) {
-        const text = renderBlocks(blocks, painter(modes.stdout), show);
+        const text = renderBlocks(
+          notShown(sameScreen),
+          painter(modes.stdout),
+          show,
+        );
         if (text) stdout(text);
         return;
       }
-      stderr(renderBlocks(blocks, paint, show) + (blocks.length ? "\n" : ""));
+      const shown = notShown(true);
+      stderr(renderBlocks(shown, paint, show) + (shown.length ? "\n" : ""));
       line(`${paint("error", "error:")} ${error.message}`);
       if (error.hint) line(paint("muted", error.hint));
       if (error.blocks?.length) {

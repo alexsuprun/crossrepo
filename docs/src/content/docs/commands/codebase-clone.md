@@ -39,7 +39,7 @@ git's own output, such as `Cloning into '...'` and the progress, goes to stderr.
   Add `remote` for `docs` in .crossrepo/config.yaml or .crossrepo/config.local.yaml.
 ```
 
-On success stdout gets the same lines, one per repo. A codebase with no repos prints nothing. On a failure stdout stays empty, and the lines and the error go to stderr.
+On success stdout gets the same lines, one per repo, so a script that reads stdout gets the full list. When stdout and stderr are both the terminal, stdout gets nothing, so you see each line once. A codebase with no repos prints nothing. On a failure stdout stays empty, and stderr gets the error after the lines, with no second copy of the lines.
 
 | Symbol | Status | Meaning |
 | --- | --- | --- |

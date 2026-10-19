@@ -80,10 +80,12 @@ function capture(
   stdoutMode: Mode,
   stderrMode: TextMode = "plain",
   codebase: string | null = CODEBASE,
+  sameScreen = false,
 ) {
   const written = { stdout: "", stderr: "" };
   const out = createOutput({
     modes: { stdout: stdoutMode, stderr: stderrMode },
+    sameScreen,
     home: HOME,
     codebase: codebase ?? undefined,
     stdout: (text) => {
@@ -808,6 +810,47 @@ describe("repos block", () => {
     const { out, written } = capture("plain");
     out.report({ blocks: [{ type: "repos", items: [] }] });
     expect(written).toEqual({ stdout: "", stderr: "" });
+  });
+
+  test("on one screen, text leaves out repos already shown live; other blocks stay", () => {
+    const { out, written } = capture("plain", "plain", CODEBASE, true);
+    out.emit({ type: "repo", repo: "api", status: "ok" });
+    out.report({
+      blocks: [repos, { type: "note", tone: "muted", text: "done" }],
+    });
+    expect(written.stderr).toBe("✓ api\n");
+    expect(written.stdout).toBe("done\n");
+  });
+
+  test("on one screen, a repos block with no live lines still prints", () => {
+    const { out, written } = capture("plain", "plain", CODEBASE, true);
+    out.report({ blocks: [repos] });
+    expect(written.stdout).toStartWith("✓ api\n");
+  });
+
+  test("on two screens, text prints the repos again for stdout", () => {
+    const { out, written } = capture("plain", "plain", CODEBASE, false);
+    out.emit({ type: "repo", repo: "api", status: "ok" });
+    out.report({ blocks: [repos] });
+    expect(written.stdout).toStartWith("✓ api\n");
+  });
+
+  test("on a failure after live lines, text never prints the repos twice on stderr", () => {
+    const { out, written } = capture("plain");
+    out.emit({ type: "repo", repo: "api", status: "ok" });
+    out.report({
+      blocks: [repos],
+      error: { code: "repos-failed", message: "1 repo failed." },
+    });
+    expect(written.stdout).toBe("");
+    expect(written.stderr).toBe("✓ api\nerror: 1 repo failed.\n");
+  });
+
+  test("JSON keeps the repos after live lines", () => {
+    const { out, written } = capture("json", "plain", CODEBASE, true);
+    out.emit({ type: "repo", repo: "api", status: "ok" });
+    out.report({ blocks: [repos] });
+    expect(JSON.parse(written.stdout).repos).toHaveLength(3);
   });
 
   test("on a failure the repos sit next to error in JSON, and go to stderr in text", () => {

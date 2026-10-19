@@ -148,6 +148,7 @@ export async function main(options: MainOptions): Promise<number> {
     }),
     stdout: options.stdout,
     stderr: options.stderr,
+    sameScreen: options.isTTY.stdout && options.isTTY.stderr,
     home: options.home,
     // A folder that is not a codebase yet shows its paths relative to `~`.
     codebase: discovery?.kind === "none" ? undefined : discovery?.codebase,
