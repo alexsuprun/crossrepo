@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as fsAdapter from "../../../../src/adapters/fs/index.ts";
 import * as gitAdapter from "../../../../src/adapters/git/index.ts";
+import * as promptAdapter from "../../../../src/adapters/prompt/index.ts";
 import { main } from "../../../../src/cli/index.ts";
 import {
   addRepoEntry,
@@ -28,6 +29,7 @@ import {
   isolate,
   writeFile,
 } from "../../../helpers/isolate.ts";
+import { fakeKeys, fakePick } from "../../../helpers/prompt.ts";
 
 let iso: Isolation;
 let codebase: string;
@@ -82,7 +84,8 @@ async function run(
   {
     cwd = codebase,
     stderrTTY = false,
-  }: { cwd?: string; stderrTTY?: boolean } = {},
+    tty = false,
+  }: { cwd?: string; stderrTTY?: boolean; tty?: boolean } = {},
 ) {
   let stdout = "";
   let stderr = "";
@@ -90,7 +93,7 @@ async function run(
     version: "1.2.3",
     argv,
     env: testEnv(),
-    isTTY: { stdin: false, stdout: false, stderr: stderrTTY },
+    isTTY: { stdin: tty, stdout: tty, stderr: stderrTTY },
     cwd,
     home: iso.home,
     interrupts,
@@ -146,6 +149,26 @@ function fakeGit(wrap: (git: gitAdapter.Git) => gitAdapter.Git) {
       wrap(real(options)),
     ),
   );
+}
+
+/**
+ * Child folders of the codebase: `lib` can be picked, `docs` has no `.git`,
+ * `api` is in the codebase file and `mine` only in config.local.
+ */
+function pickableLib() {
+  const remotes = makeRepos(codebase, { lib: {}, api: {}, mine: {} });
+  mkdirSync(join(codebase, "docs"));
+  writeFile(
+    configFile,
+    renderCodebaseConfig([
+      { name: "api", remote: remotes.api as string, defaultBranch: "main" },
+    ]),
+  );
+  writeFile(
+    join(codebase, ".crossrepo", "config.local.yaml"),
+    `repos:\n  mine:\n    remote: ${JSON.stringify(remotes.mine)}\n`,
+  );
+  return remotes;
 }
 
 /** The config and AGENTS.md text, to check that a failed run changed nothing. */
@@ -347,10 +370,150 @@ describe("xr codebase repo add <folder>", () => {
   });
 });
 
-describe("xr codebase repo add usage errors", () => {
-  test("no argument: usage, exit 2", async () => {
+describe("xr codebase repo add with no argument", () => {
+  test("in a terminal: picks a child repo folder not in repos, then adopts it", async () => {
+    const remotes = pickableLib();
+    const requests = fakePick(spies, "lib");
+    // xr runs outside the codebase, so the picked folder must be made absolute.
+    const result = await run(["--codebase-path", codebase, ...ADD], {
+      cwd: iso.root,
+      tty: true,
+    });
+    expect(result.code).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      argument: "folder",
+      message: "Pick the folder to add",
+      choices: ["lib"],
+    });
+    expect(readFileSync(configFile, "utf8")).toContain(
+      `  lib:\n    remote: ${remotes.lib}`,
+    );
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("the choices are sorted by name", async () => {
+    makeRepos(codebase, { zeta: {}, alpha: {}, mid: {} });
+    const result = await json(ADD);
+    expect(result.data.error.details).toEqual({
+      argument: "folder",
+      choices: ["alpha", "mid", "zeta"],
+    });
+  });
+
+  for (const [mode, argv, tty] of [
+    ["no TTY", ADD, false],
+    ["--json", ["--json", ...ADD], true],
+    ["--no-interactive", ["--no-interactive", "--json", ...ADD], true],
+  ] as const) {
+    test(`${mode}: missing-argument with the folders, exit 2, nothing changes`, async () => {
+      pickableLib();
+      writeFile(lockFile, `${process.ppid}\n`);
+      const before = files();
+      const result = await run([...argv], { tty });
+      expect(result.code).toBe(2);
+      if (mode === "no TTY") {
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toContain(
+          "Give a git URL to clone, or a folder in the codebase to add. Folders: lib.",
+        );
+      } else {
+        expect(JSON.parse(result.stdout).error).toEqual({
+          code: "missing-argument",
+          message:
+            "Give a git URL to clone, or a folder in the codebase to add. Folders: lib.",
+          hint: "xr codebase repo add <url> [name] | <folder>",
+          details: { argument: "folder", choices: ["lib"] },
+        });
+      }
+      expect(files()).toEqual(before);
+    });
+  }
+
+  /** Nothing to pick: `api` is in repos and `docs` has no `.git`. */
+  function nothingToPick() {
+    makeRepos(codebase, { api: {} });
+    writeFile(
+      configFile,
+      renderCodebaseConfig([
+        { name: "api", remote: "/o/api.git", defaultBranch: "main" },
+      ]),
+    );
+    mkdirSync(join(codebase, "docs"));
+  }
+
+  test("nothing to pick, --json: missing-argument with no choices", async () => {
+    nothingToPick();
     const before = files();
     const result = await json(ADD);
+    expect(result.code).toBe(2);
+    expect(result.data.error).toEqual({
+      code: "missing-argument",
+      message: "There is no folder to add.",
+      hint: "xr codebase repo add <url> [name]",
+      details: { argument: "folder", choices: [] },
+    });
+    expect(files()).toEqual(before);
+  });
+
+  for (const tty of [true, false]) {
+    test(`nothing to pick, tty ${tty}: missing-argument in text mode, no picker`, async () => {
+      nothingToPick();
+      fakeKeys(spies, []);
+      const before = files();
+      const text = await run(ADD, { tty });
+      expect(text.code).toBe(2);
+      expect(text.stdout).toBe("");
+      expect(text.stderr).toContain("There is no folder to add.");
+      expect(files()).toEqual(before);
+    });
+  }
+
+  test("a key with a null value in the codebase file is not a choice", async () => {
+    makeRepos(codebase, { api: {}, lib: {} });
+    writeFile(configFile, "repos:\n  api:\n");
+    const result = await json(ADD);
+    expect(result.code).toBe(2);
+    expect(result.data.error.details).toEqual({
+      argument: "folder",
+      choices: ["lib"],
+    });
+  });
+
+  for (const [name, key] of [
+    ["Escape", "\x1b"],
+    ["Ctrl-C", "\x03"],
+  ] as const) {
+    test(`${name} in the picker: interrupted, exit 130, nothing changes`, async () => {
+      pickableLib();
+      fakeKeys(spies, [key]);
+      const before = files();
+      const result = await run(ADD, { tty: true });
+      expect(result.code).toBe(130);
+      expect(result.stderr).toContain("Stopped by Ctrl-C.");
+      expect(files()).toEqual(before);
+      expect(existsSync(join(codebase, "lib", ".git"))).toBe(true);
+      expect(existsSync(lockFile)).toBe(false);
+    });
+  }
+
+  test("a given URL never opens a picker", async () => {
+    pickableLib();
+    spies.push(
+      spyOn(promptAdapter, "createPrompt").mockImplementation(() => ({
+        pick: () => Promise.reject(new Error("the picker opened")),
+      })),
+    );
+    const result = await run([...ADD, urls.web as string], { tty: true });
+    expect(result.code).toBe(0);
+    expect(existsSync(join(codebase, "web", ".git"))).toBe(true);
+  });
+});
+
+describe("xr codebase repo add usage errors", () => {
+  test("an empty argument: usage, exit 2", async () => {
+    const before = files();
+    const result = await json([...ADD, ""]);
     expect(result.code).toBe(2);
     expect(result.data.error.code).toBe("usage");
     expect(files()).toEqual(before);

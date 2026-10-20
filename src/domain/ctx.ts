@@ -97,6 +97,31 @@ export interface CtxLock {
   acquire(path: string): { release(): void; stalePid?: number };
 }
 
+/** What a command asks for when an argument is missing. The adapter builds the `missing-argument` error from it. */
+export interface PickRequest {
+  /** The argument name, for `error.details.argument`. */
+  argument: string;
+  /** The picker title. */
+  message: string;
+  /** The values to pick from, in the order shown. */
+  choices: readonly string[];
+  /** The start of the error message when there is no picker. */
+  missing: string;
+  /** The word before the list of choices in that message, e.g. `Choices`. */
+  listLabel: string;
+  hint: string;
+  /** The error message and hint when there are no choices. */
+  empty: { message: string; hint: string };
+}
+
+/**
+ * Asks for a missing argument. Opens a picker only when `interactive`; else, or
+ * with no choices, throws `missing-argument`. A cancelled picker throws `interrupted`.
+ */
+export interface CtxPrompt {
+  pick(request: PickRequest): Promise<string>;
+}
+
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
 export interface Ctx {
   out: { emit(event: LiveEvent): void };
@@ -108,6 +133,7 @@ export interface Ctx {
   cwd: string;
   /** stdin and stdout are a TTY, and neither `--json` nor `--no-interactive` is given. */
   interactive: boolean;
+  prompt: CtxPrompt;
   /** `path` is `<codebase>/.crossrepo/xr.lock`, resolved by `cli` (AD-7). */
   lock: { path: string; adapter: CtxLock };
   /** Ctrl-C. Only the runners listen; `on` gives the function that stops listening. */

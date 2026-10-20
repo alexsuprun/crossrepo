@@ -9,6 +9,7 @@ description: Remove a repo from a codebase and delete its folder, without losing
 xr codebase repo remove <name>
 xr codebase repo remove <name> --keep-folder
 xr codebase repo remove <name> --force
+xr codebase repo remove
 ```
 
 It works only in a codebase folder, or with `--codebase-path <path>`.
@@ -21,6 +22,14 @@ It works only in a codebase folder, or with `--codebase-path <path>`.
 | `--force` | Deletes the folder even when it has work that is only there. Use it only when you are sure. |
 
 With both options, `--keep-folder` wins and the folder stays.
+
+## Pick a repo
+
+`xr codebase repo remove` with no name opens a picker "Pick the repo to remove" in a terminal. It lists the repos of `repos:` in the codebase config, in config order. A repo that is only in `config.local.yaml` is not in the list. Pick one with the arrow keys and Enter. Then the command runs the same as `xr codebase repo remove <name>`, with the options you gave. Ctrl-C or Escape in the picker stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
+
+The picker opens only when stdin and stdout are a terminal, and neither `--json` nor `--no-interactive` is given. Otherwise the command fails with `missing-argument`, and the message lists the names, for example `Give the name of the repo to remove. Choices: api, web.` With `--json`, `error.details` is `{ "argument": "name", "choices": ["api", "web"] }`.
+
+When the codebase config has no repos, the command fails with `missing-argument` and the message `There is no repo to remove.` in every mode, also in a terminal. `choices` is empty.
 
 ## Checks first
 
@@ -69,7 +78,8 @@ With `--json`, stdout is one JSON object. `folderDeleted` is `false` with `--kee
 
 | Code | When |
 | --- | --- |
-| `usage` | No name, or more than one name. Nothing changes and no lock is taken. The exit code is 2. |
+| `usage` | More than one name. Nothing changes and no lock is taken. The exit code is 2. |
+| `missing-argument` | No name, and no picker can open (no terminal, `--json` or `--no-interactive`), or the codebase config has no repos. `error.details` is `{ "argument": "name", "choices": [<name>] }`. Nothing changes and no lock is taken. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase. A project folder is not accepted either. |
 | `repo-not-found` | The codebase config has no repo with this name. The hint names `xr codebase repo list`. |
 | `repo-in-use` | A project of this codebase uses the repo. `error.details.projects` lists the project folder names. No option skips this check. |
@@ -78,6 +88,6 @@ With `--json`, stdout is one JSON object. `folderDeleted` is `false` with `--kee
 | `git-too-old` | git is older than 2.27. |
 | `git-failed` | A git command of the check failed. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
-| `interrupted` | You pressed Ctrl-C. During the checks nothing changes. During the steps, `error.details.leftovers` lists what is left. The exit code is 130. |
+| `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in the picker. During the checks nothing changes. During the steps, `error.details.leftovers` lists what is left. The exit code is 130. |
 
 See [Output and errors](../../output/) for the exit codes.

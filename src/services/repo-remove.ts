@@ -30,7 +30,39 @@ type Loss = Awaited<ReturnType<Ctx["git"]["lossCheck"]>>;
 /** The most uncommitted file names the `would-lose-work` message shows. */
 const SHOWN_FILES = 5;
 
-/** Reads `<name>`. Throws `usage` when it is missing. */
+/**
+ * The repo name to remove: the given one, or, when none is given, the one picked
+ * from the keys of the codebase file's `repos:` in config order (D38).
+ */
+export async function removeName(
+  ctx: Pick<Ctx, "fs" | "prompt">,
+  codebase: string,
+  args: readonly (string | undefined)[],
+): Promise<string> {
+  if (args[0] !== undefined) return parseRemoveName(args);
+  return ctx.prompt.pick({
+    argument: "name",
+    message: "Pick the repo to remove",
+    choices: removeChoices(ctx, codebase),
+    missing: "Give the name of the repo to remove.",
+    listLabel: "Choices",
+    hint: "xr codebase repo remove <name>",
+    empty: {
+      message: "There is no repo to remove.",
+      hint: "xr codebase repo add <url>|<folder>",
+    },
+  });
+}
+
+/** The names `remove` accepts: the keys of the codebase file's `repos:`, in config order. */
+export function removeChoices(
+  ctx: Pick<Ctx, "fs">,
+  codebase: string,
+): string[] {
+  return repoKeys(ctx.fs.readText(codebaseConfigPath(ctx.fs, codebase)) ?? "");
+}
+
+/** Reads `<name>`. Throws `usage` when it is empty. */
 export function parseRemoveName(args: readonly (string | undefined)[]): string {
   const [name] = args;
   if (!name) {

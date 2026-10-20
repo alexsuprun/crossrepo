@@ -9,6 +9,7 @@ import type { Ctx, Tx } from "../domain/ctx.ts";
 import { XrError } from "../errors/index.ts";
 import { writeCodebaseSection } from "./agents-md.ts";
 import { checkRepo, type RepoProblem, reposNotReady } from "./codebase-init.ts";
+import { repoFolders } from "./repos.ts";
 
 /** What `xr codebase repo add` was asked to add. */
 export type RepoSource =
@@ -27,6 +28,48 @@ export interface AddedRepo {
 const USAGE_HINT = "Run `xr codebase repo add --help` for usage.";
 const NOT_READY_HINT =
   "Run the fix for the repo, then run `xr codebase repo add` again.";
+
+/**
+ * The arguments as given, or, when none is given, the absolute path of the
+ * folder picked from `addChoices` (D38). `ctx.cwd` can differ from the codebase.
+ */
+export async function sourceArgs(
+  ctx: Pick<Ctx, "fs" | "config" | "prompt">,
+  codebase: string,
+  args: readonly (string | undefined)[],
+): Promise<readonly (string | undefined)[]> {
+  if (args[0] !== undefined) return args;
+  const folder = await ctx.prompt.pick({
+    argument: "folder",
+    message: "Pick the folder to add",
+    choices: addChoices(ctx, codebase),
+    missing: "Give a git URL to clone, or a folder in the codebase to add.",
+    listLabel: "Folders",
+    hint: "xr codebase repo add <url> [name] | <folder>",
+    empty: {
+      message: "There is no folder to add.",
+      hint: "xr codebase repo add <url> [name]",
+    },
+  });
+  return [join(codebase, folder)];
+}
+
+/**
+ * The folders `add` can adopt: child folders of the codebase with a `.git`
+ * whose name is neither in the merged `repos` nor a key of the codebase file, sorted by name.
+ */
+export function addChoices(
+  ctx: Pick<Ctx, "fs" | "config">,
+  codebase: string,
+): string[] {
+  const taken = new Set([
+    ...ctx.config.repos.map((repo) => repo.name),
+    ...repoKeys(ctx.fs.readText(codebaseConfigPath(ctx.fs, codebase)) ?? ""),
+  ]);
+  return repoFolders(ctx.fs, codebase)
+    .filter((name) => !taken.has(name))
+    .sort();
+}
 
 /**
  * Reads `<url> [name]` or `<folder>`. The argument is a folder when that path

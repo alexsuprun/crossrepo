@@ -3,6 +3,7 @@ import { Command, CommanderError } from "commander";
 import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
+import { createPrompt } from "../adapters/prompt/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { codebasePull } from "../commands/codebase/pull.ts";
@@ -229,6 +230,7 @@ async function runCommand(
     discovery,
     cwd,
     interactive: flags.interactive,
+    prompt: createPrompt({ interactive: flags.interactive }),
     lock: { path: lockPath(discovery), adapter: createLock() },
     interrupts,
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
@@ -369,7 +371,7 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
       "clone a repo into the codebase, or add a repo folder that is already in it",
     )
     .usage("[options] <url> [name] | <folder>")
-    // Both are optional for commander, so a missing one is our `usage` error.
+    // Both are optional for commander, so a missing one opens our picker or gives `missing-argument`.
     .argument(
       "[url|folder]",
       "a git URL to clone, or a repo folder in the codebase",
@@ -386,7 +388,7 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .description(
       "remove a repo from the codebase config and AGENTS.md, and delete its folder",
     )
-    // Optional for commander, so a missing name is our `usage` error.
+    // Optional for commander, so a missing name opens our picker or gives `missing-argument`.
     .argument("[name]", "the name of the repo in the codebase config")
     .option("--keep-folder", "keep the repo folder; remove only the entry")
     .option(

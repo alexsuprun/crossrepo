@@ -9,6 +9,11 @@ export interface RepoState extends ConfigRepoView {
   folderWithoutGit: boolean;
 }
 
+/** The folders directly in `dir` that hold a `.git` entry, sorted by name. Reads only. */
+export function repoFolders(fs: Ctx["fs"], dir: string): string[] {
+  return fs.listDirs(dir).filter((name) => fs.exists(join(dir, name, ".git")));
+}
+
 /** The merged repos of the codebase, in config order, with their state on disk. Reads only. */
 export function repoStates(
   ctx: Pick<Ctx, "fs" | "config">,

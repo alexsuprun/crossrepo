@@ -1,9 +1,8 @@
 import { setImmediate } from "node:timers/promises";
 import type { LockHandle } from "../adapters/lock/index.ts";
-import { XrError } from "../errors/index.ts";
+import { interrupted, XrError } from "../errors/index.ts";
 import {
   acquireLock,
-  interrupted,
   type Leftover,
   listenForInterrupts,
   type RunnerEvent,
