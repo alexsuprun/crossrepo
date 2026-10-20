@@ -768,6 +768,22 @@ describe("xr codebase repo add undo", () => {
     expect(existsSync(join(codebase, "api"))).toBe(false);
   });
 
+  test("a failed AGENTS.md undo lists AGENTS.md as a leftover", async () => {
+    fakeFs((fs) =>
+      afterCall(withFault(fs, "writeText", 3), "writeText", 2, () =>
+        interrupts.fire(),
+      ),
+    );
+    const result = await json([...ADD, urls.api as string]);
+    expect(result.code).toBe(130);
+    expect(result.data.error.details.leftovers).toContainEqual({
+      what: "AGENTS.md",
+      path: agentsFile,
+      command:
+        "Remove `api` from the `## Codebase` section of AGENTS.md by hand.",
+    });
+  });
+
   test("a clone that fails after making its folder: the folder is deleted", async () => {
     const target = join(codebase, "api");
     fakeGit((git) => ({

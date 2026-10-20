@@ -7,7 +7,7 @@ import {
 } from "../domain/codebase-config.ts";
 import type { Ctx, Tx } from "../domain/ctx.ts";
 import { XrError } from "../errors/index.ts";
-import { writeCodebaseSection } from "./agents-md.ts";
+import { codebaseAgentsText, writeAgentsStep } from "./agents-md.ts";
 import { checkRepo, type RepoProblem, reposNotReady } from "./codebase-init.ts";
 import { repoFolders } from "./repos.ts";
 
@@ -228,21 +228,13 @@ export async function addRepo(
   );
 
   const agents = join(codebase, "AGENTS.md");
-  const isNew = fs.readText(agents) === undefined;
-  await tx.step(
-    "Write AGENTS.md",
-    () =>
-      // The codebase file only: a repo in `config.local` stays out of the shared AGENTS.md.
-      writeCodebaseSection(fs, codebase, codebaseRepos(newConfig)),
-    (old) =>
-      old === undefined ? fs.remove(agents) : fs.writeText(agents, old),
-    {
-      what: "AGENTS.md",
-      path: agents,
-      command: isNew
-        ? `rm "${agents}"`
-        : `Remove \`${name}\` from the \`## Codebase\` section of AGENTS.md by hand.`,
-    },
+  await writeAgentsStep(
+    fs,
+    tx,
+    agents,
+    // The codebase file only: a repo in `config.local` stays out of the shared AGENTS.md.
+    codebaseAgentsText(fs, codebase, codebaseRepos(newConfig)),
+    `Remove \`${name}\` from the \`## Codebase\` section of AGENTS.md by hand.`,
   );
 
   return {

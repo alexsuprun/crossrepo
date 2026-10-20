@@ -6,7 +6,7 @@ import {
 import type { Ctx, GitCallOptions, Tx } from "../domain/ctx.ts";
 import type { Block, Text } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
-import { writeCodebaseSection } from "./agents-md.ts";
+import { codebaseAgentsText, writeAgentsStep } from "./agents-md.ts";
 import { repoFolders } from "./repos.ts";
 
 /** One row of the `repos` table of a `repos-not-ready` error. */
@@ -137,18 +137,11 @@ export async function writeCodebaseFiles(
     () => {},
     { what: "config file", path: config, command: `rm "${config}"` },
   );
-  const isNew = fs.readText(agents) === undefined;
-  await tx.step(
-    "Write AGENTS.md",
-    () => writeCodebaseSection(fs, dir, repos),
-    (old) =>
-      old === undefined ? fs.remove(agents) : fs.writeText(agents, old),
-    {
-      what: "AGENTS.md",
-      path: agents,
-      command: isNew
-        ? `rm "${agents}"`
-        : "Remove the `## Codebase` section from AGENTS.md by hand.",
-    },
+  await writeAgentsStep(
+    fs,
+    tx,
+    agents,
+    codebaseAgentsText(fs, dir, repos),
+    "Remove the `## Codebase` section from AGENTS.md by hand.",
   );
 }
