@@ -13,10 +13,10 @@ Every command accepts these 4 flags:
 | --- | --- |
 | `--codebase-path <path>` | Use the codebase at `<path>`. |
 | `--json` | Print the result as one JSON object on stdout. `xr` never asks questions. |
-| `--no-interactive` | Never ask questions. |
+| `--no-interactive` | Never ask questions. A command with a missing argument fails with `missing-argument` instead of opening a picker. |
 | `--verbose` | When `xr` crashes, print the stack trace on stderr. It changes nothing else. |
 
-`xr` asks questions only when stdin and stdout are both a terminal, and neither `--json` nor `--no-interactive` is given.
+`xr` asks questions only when stdin and stdout are both a terminal, and neither `--json` nor `--no-interactive` is given. Then a missing argument, for example the repo name of `xr codebase repo remove`, opens a picker on stderr. Pick with the arrow keys and Enter. Ctrl-C or Escape stops the command with `interrupted` (exit code 130) and changes nothing. In every other case, `xr` never reads stdin: a missing argument fails with `missing-argument` and the message lists the choices.
 
 ## stdout and stderr
 
@@ -87,6 +87,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | Code | Meaning |
 | --- | --- |
 | `usage` | A bad flag, an unknown command or a missing option value. |
+| `missing-argument` | A command needs an argument that you did not give, and `xr` cannot ask for it (no terminal, `--json` or `--no-interactive`), or there is nothing to pick. The message lists the choices. `error.details` is `{ "argument", "choices" }`, where `choices` is a list of strings, empty when there is nothing to pick. The exit code is 2. |
 | `internal` | A bug in `xr`. Run the command again with `--verbose` and report the output on [GitHub](https://github.com/alexsuprun/crossrepo/issues). |
 | `not-a-codebase` | The folder is not a codebase or a project, or the project's `codebase` path is not a codebase. Use `--codebase-path <path>`. |
 | `config-conflict` | One config level has both a `.yaml` and a `.yml` file. |
@@ -105,7 +106,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `would-lose-work` | `xr codebase repo remove` would delete a repo folder that has uncommitted changes, unpushed commits or stashes, or that has no `.git`. Nothing changes. |
 | `repos-failed` | A command that works on each repo, such as `xr codebase clone` or `xr codebase pull`, had at least one repo that failed. The other repos still ran. `repos` lists each repo as `{ "repo", "status", "message"?, "hint"? }`. |
 | `lock-held` | Another `xr` command that changes files is running in this codebase. The message has its process ID (pid). Wait for it to end, then run the command again. `xr` does not wait or retry. |
-| `interrupted` | You pressed Ctrl-C. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
+| `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in a picker. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
 
 Warning codes, in `warnings`:
 
@@ -122,7 +123,7 @@ New commands add new codes. A script must handle a code that it does not know as
 | --- | --- |
 | `0` | Success. |
 | `1` | Any failure that is not a usage error or Ctrl-C. |
-| `2` | A usage error. |
+| `2` | A usage error: `usage` or `missing-argument`. |
 | `130` | Ctrl-C (`interrupted`). |
 
 ## Lock and Ctrl-C

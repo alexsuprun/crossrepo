@@ -7,6 +7,7 @@ import type { Ctx, GitCallOptions, Tx } from "../domain/ctx.ts";
 import type { Block, Text } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
 import { writeCodebaseSection } from "./agents-md.ts";
+import { repoFolders } from "./repos.ts";
 
 /** One row of the `repos` table of a `repos-not-ready` error. */
 export interface RepoProblem {
@@ -25,9 +26,7 @@ export async function checkRepos(
   dir: string,
 ): Promise<ConfigRepo[]> {
   await ctx.git.version();
-  const names = ctx.fs
-    .listDirs(dir)
-    .filter((name) => ctx.fs.exists(join(dir, name, ".git")));
+  const names = repoFolders(ctx.fs, dir);
   const repos: ConfigRepo[] = [];
   const problems: RepoProblem[] = [];
   for (const name of names) {

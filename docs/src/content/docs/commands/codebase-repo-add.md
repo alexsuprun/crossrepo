@@ -8,6 +8,7 @@ description: Clone a repo into a codebase, or add a repo folder that is already 
 ```sh
 xr codebase repo add <url> [name]
 xr codebase repo add <folder>
+xr codebase repo add
 ```
 
 It works only in a codebase folder, or with `--codebase-path <path>`.
@@ -37,6 +38,14 @@ xr codebase repo add ./web
 ```
 
 A folder outside the codebase, or deeper in it, fails with `not-in-codebase`. Move the folder into the codebase first.
+
+### Pick a folder
+
+`xr codebase repo add` with no argument opens a picker "Pick the folder to add" in a terminal. It lists the folders directly in the codebase that have a `.git` and whose name is not a repo in the config yet (also not in `config.local.yaml`), sorted by name. Pick one with the arrow keys and Enter. Then the command runs the same as `xr codebase repo add <codebase>/<folder>`. Ctrl-C or Escape in the picker stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
+
+The picker opens only when stdin and stdout are a terminal, and neither `--json` nor `--no-interactive` is given. Otherwise the command fails with `missing-argument`, and the message lists the folders, for example `Give a git URL to clone, or a folder in the codebase to add. Folders: lib.` With `--json`, `error.details` is `{ "argument": "folder", "choices": ["lib"] }`.
+
+When no folder can be picked, the command fails with `missing-argument` and the message `There is no folder to add.` in every mode, also in a terminal. `choices` is empty. Give a URL to clone instead.
 
 ## What it changes
 
@@ -85,7 +94,8 @@ With `--json`, stdout is one JSON object. The git output stays on stderr. `added
 
 | Code | When |
 | --- | --- |
-| `usage` | No argument, a folder with a name, a name that is not valid, or too many arguments. Nothing changes. The exit code is 2. |
+| `usage` | A folder with a name, a name that is not valid, or too many arguments. Nothing changes. The exit code is 2. |
+| `missing-argument` | No argument, and no picker can open (no terminal, `--json` or `--no-interactive`), or no folder can be picked. `error.details` is `{ "argument": "folder", "choices": [<folder>] }`. Nothing changes and no lock is taken. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase. A project folder is not accepted either. |
 | `repo-exists` | The codebase config has the name already (also in `config.local.yaml`, or as an empty key), or the folder to clone into exists. Nothing changes. |
 | `not-in-codebase` | The folder is not directly in the codebase folder. Nothing changes. The hint says to move it into the codebase first. |
@@ -93,7 +103,7 @@ With `--json`, stdout is one JSON object. The git output stays on stderr. `added
 | `git-too-old` | git is older than 2.27. |
 | `git-failed` | A git command failed, for example a clone of a URL that does not exist. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
-| `interrupted` | You pressed Ctrl-C. The steps that were done are undone. The exit code is 130. |
+| `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in the picker. The steps that were done are undone. The exit code is 130. |
 
 When a step fails and an undo also fails, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`.
 

@@ -175,6 +175,29 @@ describe("checkImports on fixtures", () => {
     ]);
   });
 
+  test("allows @clack/prompts only in src/adapters/prompt, never spinner, tasks or block", () => {
+    expect(
+      rules({
+        "src/adapters/prompt/index.ts":
+          'import { isCancel, select } from "@clack/prompts";',
+        "src/adapters/prompt/a.ts": 'import { spinner } from "@clack/prompts";',
+        "src/adapters/prompt/b.ts":
+          'import { select, tasks as run } from "@clack/prompts";',
+        "src/adapters/prompt/c.ts": 'import * as clack from "@clack/prompts";',
+        "src/adapters/prompt/d.ts": 'export { block } from "@clack/prompts";',
+        "src/adapters/git/a.ts": 'import { select } from "@clack/prompts";',
+        "src/cli/a.ts": 'import { select } from "@clack/core";',
+      }),
+    ).toEqual([
+      "@clack/prompts may not be used for spinner, tasks or block",
+      "@clack/prompts may not be used for spinner, tasks or block",
+      "@clack/prompts may not be used for spinner, tasks or block",
+      "@clack/prompts may not be used for spinner, tasks or block",
+      "only src/adapters/prompt may import @clack/prompts",
+      "only src/adapters/prompt may import @clack/core",
+    ]);
+  });
+
   test("sees type imports, re-exports and dynamic imports", () => {
     expect(
       rules({

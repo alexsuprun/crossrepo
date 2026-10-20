@@ -22,6 +22,7 @@ export const ERROR_CODES = [
   "invalid-project-record",
   "would-lose-work",
   "repos-failed",
+  "missing-argument",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -130,9 +131,22 @@ export function withBlocks(
   return error;
 }
 
-/** Maps an error to the process exit code: `usage` is 2, `interrupted` is 130, every other code is 1. */
+/** The error of a run stopped by the first Ctrl-C, or of a cancelled picker. */
+export function interrupted(): XrError {
+  return new XrError({
+    code: "interrupted",
+    message: "Stopped by Ctrl-C.",
+  });
+}
+
+/**
+ * Maps an error to the process exit code: `usage` and `missing-argument` are 2,
+ * `interrupted` is 130, every other code is 1.
+ */
 export function exitCodeFor(error: XrError): number {
-  if (error.code === "usage") return EXIT_USAGE;
+  if (error.code === "usage" || error.code === "missing-argument") {
+    return EXIT_USAGE;
+  }
   if (error.code === "interrupted") return EXIT_INTERRUPTED;
   return EXIT_FAILURE;
 }
