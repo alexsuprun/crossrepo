@@ -7,7 +7,7 @@ import {
 import type { Ctx, Tx } from "../domain/ctx.ts";
 import { LIST_HINT } from "../domain/hints.ts";
 import { XrError } from "../errors/index.ts";
-import { writeCodebaseSection } from "./agents-md.ts";
+import { codebaseAgentsText, writeAgentsText } from "./agents-md.ts";
 import { codebaseProjects } from "./projects.ts";
 import { codebaseConfigPath } from "./repo-add.ts";
 
@@ -121,7 +121,12 @@ export async function removeRepo(
     {
       label: "Write AGENTS.md",
       // The codebase file only: a repo in `config.local` stays out of the shared AGENTS.md.
-      run: () => writeCodebaseSection(fs, codebase, codebaseRepos(newConfig)),
+      run: () =>
+        writeAgentsText(
+          fs,
+          agents,
+          codebaseAgentsText(fs, codebase, codebaseRepos(newConfig)),
+        ),
       manualCleanup: {
         what: "AGENTS.md",
         path: agents,

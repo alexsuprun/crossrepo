@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   detectEol,
   findSections,
+  projectReposSection,
   renderCodebaseSection,
+  renderProjectCodebaseSection,
+  spliceProjectSections,
   spliceSection,
 } from "../../src/domain/agents-md.ts";
 
@@ -175,5 +178,208 @@ describe("splice the codebase section", () => {
       end: 14,
     });
     expect(findSections("## `Repos`\n").repos).toEqual({ start: 0, end: 11 });
+  });
+});
+
+describe("renderProjectCodebaseSection", () => {
+  test("names the branch and links each repo to its instruction file, relative with `/`", () => {
+    expect(
+      renderProjectCodebaseSection(
+        "feat/x",
+        [
+          {
+            name: "api",
+            description: "The HTTP API",
+            instructions: "AGENTS.md",
+          },
+          { name: "web", description: "", instructions: "CLAUDE.md" },
+          { name: "cli", description: "Command\n  line" },
+          { name: "docs" },
+        ],
+        "\n",
+      ),
+    ).toBe(
+      [
+        "## Codebase",
+        "",
+        "This folder is a crossrepo project for branch `feat/x`. `xr` writes this section, so do not edit it by hand.",
+        "",
+        "Each repo is a git worktree on this branch. Run `xr --help` to see all commands.",
+        "",
+        "Repos:",
+        "",
+        "- [`api`](api/AGENTS.md) — The HTTP API",
+        "- [`web`](web/CLAUDE.md)",
+        "- `cli` — Command line",
+        "- `docs`",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("with no repos the list is one `- none` line", () => {
+    expect(renderProjectCodebaseSection("main", [], "\n")).toEndWith(
+      "Repos:\n\n- none\n",
+    );
+  });
+
+  test("uses the given line ending on every line", () => {
+    const text = renderProjectCodebaseSection(
+      "main",
+      [{ name: "api" }],
+      "\r\n",
+    );
+    expect(text).toEndWith("- `api`\r\n");
+    expect(text.replaceAll("\r\n", "")).not.toContain("\n");
+  });
+});
+
+describe("projectReposSection", () => {
+  const FULL = [
+    "# Agents",
+    "",
+    "Intro.",
+    "",
+    "## Codebase",
+    "",
+    "old",
+    "",
+    "## Repos",
+    "",
+    "Notes for every repo.",
+    "",
+    "### API",
+    "",
+    "api text",
+    "",
+    "### web",
+    "",
+    "web text",
+    "",
+    "### docs",
+    "",
+    "docs text",
+    "",
+    "## Other",
+    "",
+    "other",
+    "",
+  ].join("\n");
+
+  test("keeps the heading, the preamble and the matching subsections (case ignored)", () => {
+    expect(projectReposSection(FULL, ["web", "api"])).toBe(
+      "## Repos\n\nNotes for every repo.\n\n### API\n\napi text\n\n### web\n\nweb text\n",
+    );
+  });
+
+  test("two subsections for one repo: both kept, in file order", () => {
+    const text =
+      "## Repos\n\n### api\n\none\n\n### web\n\nw\n\n###  Api \n\ntwo\n";
+    expect(projectReposSection(text, ["api"])).toBe(
+      "## Repos\n\n### api\n\none\n\n###  Api \n\ntwo\n",
+    );
+  });
+
+  test("a subsection that ends in a spaces-only line loses that line", () => {
+    const text = "## Repos\n\n### a\n\nx\n   \n\t\n### b\n\ny\n";
+    expect(projectReposSection(text, ["a", "b"])).toBe(
+      "## Repos\n\n### a\n\nx\n\n### b\n\ny\n",
+    );
+  });
+
+  test("a repo with no subsection gets no entry and no placeholder", () => {
+    const text = "## Repos\n\nPre.\n\n### api\n\na\n";
+    expect(projectReposSection(text, ["cli"])).toBe("## Repos\n\nPre.\n");
+  });
+
+  test("`####` headings and headings in a code block stay inside the subsection", () => {
+    const api = "### api\n\n#### Notes\n\nn\n\n```md\n### web\n```\n\nafter";
+    const text = `## Repos\n\n${api}\n\n### web\n\nw\n`;
+    expect(projectReposSection(text, ["api"])).toBe(`## Repos\n\n${api}\n`);
+  });
+
+  test("a `#` heading ends the last subsection and the section", () => {
+    const text = "## Repos\n\n### api\n\na\n\n# Appendix\n\n### web\n";
+    expect(projectReposSection(text, ["api", "web"])).toBe(
+      "## Repos\n\n### api\n\na\n",
+    );
+  });
+
+  test("CRLF: new line ends are \\r\\n", () => {
+    const text =
+      "## Repos\r\n\r\nPre.\r\n\r\n### a\r\n\r\nx\r\n\r\n### b\r\n\r\ny\r\n";
+    const section = projectReposSection(text, ["b"]);
+    expect(section).toBe("## Repos\r\n\r\nPre.\r\n\r\n### b\r\n\r\ny\r\n");
+  });
+
+  test("no `## Repos` or no text: the heading only", () => {
+    expect(projectReposSection("# A\n", ["api"])).toBe("## Repos\n");
+    expect(projectReposSection("", [])).toBe("## Repos\n");
+    expect(projectReposSection("# A\r\n", [])).toBe("## Repos\r\n");
+  });
+
+  test("a leading BOM does not shift the subsections", () => {
+    expect(
+      projectReposSection("\uFEFF## Repos\n\n### a\n\nx\n\n### b\n\ny\n", [
+        "b",
+      ]),
+    ).toBe("## Repos\n\n### b\n\ny\n");
+  });
+
+  test("a different given eol: every line end of the result is that eol", () => {
+    expect(
+      projectReposSection("## Repos\n\nPre.\n\n### a\n\nx\ny\n", ["a"], "\r\n"),
+    ).toBe("## Repos\r\n\r\nPre.\r\n\r\n### a\r\n\r\nx\r\ny\r\n");
+  });
+
+  test("a mixed codebase file with its own eol keeps its copied bytes", () => {
+    const text = "## Repos\r\n\r\n### a\r\n\r\nx\ny\r\n";
+    expect(projectReposSection(text, ["a"], "\r\n")).toBe(text);
+  });
+});
+
+describe("spliceProjectSections", () => {
+  const CB = renderProjectCodebaseSection("main", [{ name: "api" }], "\n");
+
+  test("only `## Codebase` and `## Repos` change; every other byte stays", () => {
+    const intro = "# Agents\n\nIntro.\n\n";
+    const other = "## Other\n\nother\n";
+    const base = `${intro}## Codebase\n\nold\n\n## Repos\n\nr\n\n${other}`;
+    const repos = "## Repos\n\n### api\n";
+    expect(spliceProjectSections(base, CB, repos)).toBe(
+      `${intro}${CB}\n${repos}\n${other}`,
+    );
+  });
+
+  test("`## Repos` before `## Codebase` keeps its place", () => {
+    const base = "## Repos\n\nr\n\n## Codebase\n\nold\n";
+    expect(spliceProjectSections(base, CB, "## Repos\n")).toBe(
+      `## Repos\n\n${CB}`,
+    );
+  });
+
+  test("both missing: `## Codebase`, then `## Repos`, at the end", () => {
+    expect(spliceProjectSections("", CB, "## Repos\n")).toBe(
+      `${CB}\n## Repos\n`,
+    );
+    expect(spliceProjectSections("# A\n", CB, "## Repos\n")).toBe(
+      `# A\n\n${CB}\n## Repos\n`,
+    );
+  });
+
+  test("no `## Repos`: the heading only is added at the end", () => {
+    const base = "# A\n\n## Codebase\n\nold\n\n## Notes\n\nn\n";
+    expect(spliceProjectSections(base, CB, "## Repos\n")).toBe(
+      `# A\n\n${CB}\n## Notes\n\nn\n\n## Repos\n`,
+    );
+  });
+
+  test("CRLF base: every new line end is \\r\\n", () => {
+    const base =
+      "# A\r\n\r\n## Codebase\r\n\r\nold\r\n\r\n## Repos\r\n\r\nr\r\n\r\n## Notes\r\n";
+    const cb = renderProjectCodebaseSection("main", [{ name: "api" }], "\r\n");
+    const text = spliceProjectSections(base, cb, "## Repos\r\n");
+    expect(text).toBe(`# A\r\n\r\n${cb}\r\n## Repos\r\n\r\n## Notes\r\n`);
+    expect(text.replaceAll("\r\n", "")).not.toContain("\n");
   });
 });
