@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import {
+  createMultiPrompt,
   createPrompt,
   type PickRequest,
 } from "../../../src/adapters/prompt/index.ts";
@@ -46,7 +47,10 @@ function fakeTerminal({
   });
   for (const key of keys) input.write(key);
   return {
-    prompt: createPrompt({ interactive, input, output }),
+    prompt: {
+      ...createPrompt({ interactive, input, output }),
+      ...createMultiPrompt({ interactive, input, output }),
+    },
     written: () => written,
     read: () => read,
   };
@@ -146,6 +150,65 @@ describe("createPrompt with no choices", () => {
       expect(error.hint).toBe("xr codebase repo add <url>|<folder>");
       expect(error.details).toEqual({ argument: "name", choices: [] });
       expect(terminal.written()).toBe("");
+      expect(terminal.read()).toBe(false);
+    });
+  }
+});
+
+describe("createPrompt pickMany", () => {
+  const SPACE = " ";
+
+  test("Space marks, Enter gives the marked choices in list order", async () => {
+    const terminal = fakeTerminal({
+      interactive: true,
+      keys: [DOWN, SPACE, "\x1b[A", SPACE, ENTER],
+    });
+    expect(
+      await terminal.prompt.pickMany(request(["api", "web", "db"])),
+    ).toEqual(["api", "web"]);
+    expect(terminal.written()).toContain("Pick the repo to remove");
+  });
+
+  test("at least one is needed: Enter with none marked does not end the picker", async () => {
+    const terminal = fakeTerminal({
+      interactive: true,
+      keys: [ENTER, SPACE, ENTER],
+    });
+    expect(await terminal.prompt.pickMany(request(["api", "web"]))).toEqual([
+      "api",
+    ]);
+  });
+
+  for (const [name, key] of [
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ] as const) {
+    test(`${name} cancels: interrupted`, async () => {
+      const terminal = fakeTerminal({ interactive: true, keys: [key] });
+      const error = await failure(terminal.prompt.pickMany(request(["api"])));
+      expect(error.code).toBe("interrupted");
+    });
+  }
+
+  test("not interactive: missing-argument with the choices; nothing is read", async () => {
+    const terminal = fakeTerminal({ interactive: false, keys: [ENTER] });
+    const error = await failure(
+      terminal.prompt.pickMany(request(["api", "web"])),
+    );
+    expect(error.code).toBe("missing-argument");
+    expect(error.details).toEqual({
+      argument: "name",
+      choices: ["api", "web"],
+    });
+    expect(terminal.read()).toBe(false);
+  });
+
+  for (const interactive of [true, false]) {
+    test(`no choices, interactive ${interactive}: the empty message`, async () => {
+      const terminal = fakeTerminal({ interactive, keys: [ENTER] });
+      const error = await failure(terminal.prompt.pickMany(request([])));
+      expect(error.code).toBe("missing-argument");
+      expect(error.message).toBe("There is no repo to remove.");
       expect(terminal.read()).toBe(false);
     });
   }

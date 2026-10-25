@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { isCancel, select } from "@clack/prompts";
+import { isCancel, multiselect, select } from "@clack/prompts";
 import { interrupted, XrError } from "../../errors/index.ts";
 
 /** What a command asks for when an argument is missing. */
@@ -19,13 +19,22 @@ export interface PickRequest {
   empty: { message: string; hint: string };
 }
 
-/** The prompt adapter, as `ctx.prompt`. */
+/** The one-choice picker; `cli` merges it with `MultiPrompt` into `ctx.prompt`. */
 export interface Prompt {
   /**
    * Gives the picked choice. With no choices, or when not interactive, throws
    * `missing-argument` and never reads the input. A cancel (Ctrl-C or Escape) throws `interrupted`.
    */
   pick(request: PickRequest): Promise<string>;
+}
+
+/** The multi-select picker. */
+export interface MultiPrompt {
+  /**
+   * Gives the marked choices, at least one, in list order. The same no-choices,
+   * not-interactive and cancel rules as `pick`.
+   */
+  pickMany(request: PickRequest): Promise<string[]>;
 }
 
 export interface CreatePromptOptions {
@@ -44,30 +53,12 @@ export function createPrompt({
   output,
 }: CreatePromptOptions): Prompt {
   return {
-    async pick({
-      argument,
-      message,
-      choices,
-      missing,
-      listLabel,
-      hint,
-      empty,
-    }) {
-      if (choices.length === 0) {
-        throw missingArgument(empty.message, empty.hint, argument, []);
-      }
-      if (!interactive) {
-        throw missingArgument(
-          `${missing} ${listLabel}: ${choices.join(", ")}.`,
-          hint,
-          argument,
-          [...choices],
-        );
-      }
+    async pick(request) {
+      checkCanPick(request, interactive);
       // clack reads Ctrl-C as a key in raw mode, so no SIGINT handler is needed here.
       const picked = await select({
-        message,
-        options: choices.map((value) => ({ value })),
+        message: request.message,
+        options: request.choices.map((value) => ({ value })),
         input: input ?? process.stdin,
         output: output ?? process.stderr,
       });
@@ -75,6 +66,47 @@ export function createPrompt({
       return picked;
     },
   };
+}
+
+/** The multi-select picker, with clack `multiselect`. */
+export function createMultiPrompt({
+  interactive,
+  input,
+  output,
+}: CreatePromptOptions): MultiPrompt {
+  return {
+    async pickMany(request) {
+      checkCanPick(request, interactive);
+      const picked = await multiselect({
+        message: request.message,
+        options: request.choices.map((value) => ({ value })),
+        required: true,
+        input: input ?? process.stdin,
+        output: output ?? process.stderr,
+      });
+      if (isCancel(picked)) throw interrupted();
+      const marked = new Set(picked);
+      return request.choices.filter((choice) => marked.has(choice));
+    },
+  };
+}
+
+/** Throws `missing-argument` when there is no picker to open. */
+function checkCanPick(
+  { argument, choices, missing, listLabel, hint, empty }: PickRequest,
+  interactive: boolean,
+): void {
+  if (choices.length === 0) {
+    throw missingArgument(empty.message, empty.hint, argument, []);
+  }
+  if (!interactive) {
+    throw missingArgument(
+      `${missing} ${listLabel}: ${choices.join(", ")}.`,
+      hint,
+      argument,
+      [...choices],
+    );
+  }
 }
 
 function missingArgument(

@@ -19,8 +19,25 @@ export function fakePick(
   return requests;
 }
 
+/** Makes `createMultiPrompt` give a fake that picks `values` and keeps each request. The spy goes in `spies`. */
+export function fakePickMany(
+  spies: { mockRestore(): void }[],
+  values: string[],
+): promptAdapter.PickRequest[] {
+  const requests: promptAdapter.PickRequest[] = [];
+  spies.push(
+    spyOn(promptAdapter, "createMultiPrompt").mockImplementation(() => ({
+      pickMany: (request) => {
+        requests.push(request);
+        return Promise.resolve(values);
+      },
+    })),
+  );
+  return requests;
+}
+
 /**
- * Makes `createPrompt` give the real adapter on fake streams, with `keys` typed in,
+ * Makes `createPrompt` and `createMultiPrompt` give the real adapters on fake streams, with `keys` typed in,
  * so it never reads the real stdin. The spy goes in `spies`.
  */
 export function fakeKeys(
@@ -32,9 +49,13 @@ export function fakeKeys(
   const output = new PassThrough();
   output.resume();
   for (const key of keys) input.write(key);
+  const realMulti = promptAdapter.createMultiPrompt;
   spies.push(
     spyOn(promptAdapter, "createPrompt").mockImplementation((options) =>
       real({ ...options, input, output }),
+    ),
+    spyOn(promptAdapter, "createMultiPrompt").mockImplementation((options) =>
+      realMulti({ ...options, input, output }),
     ),
   );
 }

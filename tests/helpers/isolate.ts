@@ -31,7 +31,7 @@ const ENV_NAMES = [
  * command and smoke test that touches files or git uses it (AD-13).
  */
 export function isolate(): Isolation {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "xr-test-")));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "xr-test-")));
   const home = join(root, "home");
   mkdirSync(home);
   const gitConfig = join(root, "gitconfig");
