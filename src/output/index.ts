@@ -75,6 +75,24 @@ export interface RepoItem {
   source?: string;
 }
 
+/** One project of a `projects` block. */
+export interface ProjectItem {
+  project: string;
+  branch: string;
+  path: Text;
+  /** In record order. */
+  repos: string[];
+  /** ISO 8601 UTC; `null` in JSON when absent. */
+  created?: string;
+}
+
+/** One repo of a `project` block: `present` when its worktree folder exists. */
+export interface ProjectRepoItem {
+  repo: string;
+  path: Text;
+  present: boolean;
+}
+
 /** What a part of the Report is, never how it looks. The set is closed (AD-3). */
 export type Block =
   /** A boolean or a number prints as `<key>: <value>` in text modes; JSON keeps its type. */
@@ -90,7 +108,22 @@ export type Block =
       items: { what: string; path: Text; command: Text }[];
     }
   | { type: "section"; key: string; title: Text; blocks: Block[] }
-  | { type: "note"; tone: Tone; text: Text };
+  | { type: "note"; tone: Tone; text: Text }
+  /** Projects with their repos as child lines in text; `entries` in JSON. */
+  | { type: "projects"; items: ProjectItem[] }
+  /**
+   * One project. Text: aligned label rows, `codebase` relative to `~` only, then
+   * the repos. JSON: its fields as top-level keys.
+   */
+  | {
+      type: "project";
+      project: string;
+      branch: string;
+      path: Text;
+      codebase: Text;
+      created?: string;
+      repos: ProjectRepoItem[];
+    };
 
 /** The error of a failed command. Same fields as `XrError`, which `output` may not import. */
 export interface ReportError {
@@ -182,7 +215,8 @@ export function createOutput({
         : text;
   const paint = painter(modes.stderr);
   const line = (text: string) => stderr(`${text}\n`);
-  const show = (text: Text) => showText(text, home, codebase);
+  const show: Show = (text, { homeOnly = false } = {}) =>
+    showText(text, home, homeOnly ? undefined : codebase);
 
   return {
     emit(event) {
@@ -246,6 +280,9 @@ export function createOutput({
 
 type Paint = (tone: Tone, text: string) => string;
 
+/** Text-mode form of a value. `homeOnly` shows a path relative to `~`, never to the codebase. */
+type Show = (text: Text, options?: { homeOnly?: boolean }) => string;
+
 /** `error.details`: the plain details and the data of the error blocks. Throws on a key clash. */
 function errorDetails({
   details = {},
@@ -271,14 +308,15 @@ function blocksData(
   );
   for (const block of blocks) {
     if (block.type === "note") continue;
-    const [key, value] = blockData(block);
-    if (topLevel && RESERVED_KEYS.has(key)) {
-      throw new Error(`The Report uses the reserved key "${key}".`);
+    for (const [key, value] of blockEntries(block)) {
+      if (topLevel && RESERVED_KEYS.has(key)) {
+        throw new Error(`The Report uses the reserved key "${key}".`);
+      }
+      if (Object.hasOwn(data, key)) {
+        throw new Error(`The Report has the key "${key}" twice.`);
+      }
+      data[key] = value;
     }
-    if (Object.hasOwn(data, key)) {
-      throw new Error(`The Report has the key "${key}" twice.`);
-    }
-    data[key] = value;
   }
   if (notes.length) {
     if (Object.hasOwn(data, "notes")) {
@@ -287,6 +325,26 @@ function blocksData(
     data.notes = notes;
   }
   return data;
+}
+
+/** The JSON keys of a block: one key, or several for the flat `project` block. */
+function blockEntries(block: Block): [string, unknown][] {
+  if (block.type !== "project") return [blockData(block)];
+  return [
+    ["project", block.project],
+    ["branch", block.branch],
+    ["path", jsonText(block.path)],
+    ["codebase", jsonText(block.codebase)],
+    ["created", block.created ?? null],
+    [
+      "repos",
+      block.repos.map(({ repo, path, present }) => ({
+        repo,
+        path: jsonText(path),
+        present,
+      })),
+    ],
+  ];
 }
 
 function blockData(block: Block): [string, unknown] {
@@ -327,6 +385,17 @@ function blockData(block: Block): [string, unknown] {
       ];
     case "section":
       return [block.key, blocksData(block.blocks, false)];
+    case "projects":
+      return [
+        "entries",
+        block.items.map(({ project, branch, path, repos, created }) => ({
+          project,
+          branch,
+          path: jsonText(path),
+          repos,
+          created: created ?? null,
+        })),
+      ];
     default:
       return noRenderer(block);
   }
@@ -383,23 +452,21 @@ function insideOf(folder: string, target: string): string | undefined {
 function renderBlocks(
   blocks: readonly Block[],
   paint: Paint,
-  show: (text: Text) => string,
+  show: Show,
 ): string {
   return blocks
     .filter(
       (block) =>
-        (block.type !== "table" && block.type !== "repos") ||
+        (block.type !== "table" &&
+          block.type !== "repos" &&
+          block.type !== "projects") ||
         block.items.length > 0,
     )
     .map((block) => `${renderBlock(block, paint, show)}\n`)
     .join("\n");
 }
 
-function renderBlock(
-  block: Block,
-  paint: Paint,
-  show: (text: Text) => string,
-): string {
+function renderBlock(block: Block, paint: Paint, show: Show): string {
   switch (block.type) {
     case "value":
       return typeof block.value === "boolean" || typeof block.value === "number"
@@ -430,6 +497,10 @@ function renderBlock(
         .join("\n");
       return inner ? `${show(block.title)}\n${indented}` : show(block.title);
     }
+    case "projects":
+      return renderProjects(block.items, show);
+    case "project":
+      return renderProject(block, paint, show);
     default:
       return noRenderer(block);
   }
@@ -439,7 +510,7 @@ function renderBlock(
 function renderRepo(
   { repo, status, message, hint }: RepoItem,
   paint: Paint,
-  show: (text: Text) => string,
+  show: Show,
 ): string {
   const { symbol, tone } = REPO_LOOK[status];
   const tail = message ? `: ${show(message)}` : "";
@@ -447,10 +518,58 @@ function renderRepo(
   return hint ? `${head}\n${paint("muted", `  ${show(hint)}`)}` : head;
 }
 
+/** One aligned `name  branch  date` row per project, then one indented line per repo. */
+function renderProjects(items: readonly ProjectItem[], show: Show): string {
+  const projectWidth = Math.max(...items.map(({ project }) => project.length));
+  const branchWidth = Math.max(...items.map(({ branch }) => branch.length));
+  return items
+    .map(({ project, branch, repos, created }) =>
+      [
+        [
+          project.padEnd(projectWidth),
+          branch.padEnd(branchWidth),
+          created?.slice(0, 10) ?? "",
+        ]
+          .join("  ")
+          .trimEnd(),
+        ...repos.map((repo) => `  ${show(repo)}`),
+      ].join("\n"),
+    )
+    .join("\n");
+}
+
+/** Aligned label rows, then `repos` with `✓` or `–` per repo. */
+function renderProject(
+  block: Extract<Block, { type: "project" }>,
+  paint: Paint,
+  show: Show,
+): string {
+  const rows: [string, string][] = [
+    ["project", block.project],
+    ["branch", block.branch],
+    ["path", show(block.path)],
+    ["codebase", show(block.codebase, { homeOnly: true })],
+    ["created", block.created ?? ""],
+  ];
+  const width = Math.max(...rows.map(([label]) => label.length));
+  const repoWidth = Math.max(0, ...block.repos.map(({ repo }) => repo.length));
+  return [
+    ...rows.map(([label, value]) =>
+      value ? `${label.padEnd(width)}  ${value}` : label,
+    ),
+    "repos",
+    ...block.repos.map(({ repo, present }) =>
+      present
+        ? `  ${paint("ok", SYMBOL.ok)} ${repo}`
+        : `  ${paint("muted", SYMBOL.skipped)} ${repo.padEnd(repoWidth)}   ${paint("warn", "worktree folder missing")}`,
+    ),
+  ].join("\n");
+}
+
 function renderFields(
   items: readonly FieldItem[],
   paint: Paint,
-  show: (text: Text) => string,
+  show: Show,
 ): string {
   const keyWidth = Math.max(...items.map((item) => item.key.length));
   const valueWidth = Math.max(
@@ -487,7 +606,7 @@ function renderFields(
 function renderTable(
   items: readonly Record<string, Cell>[],
   paint: Paint,
-  show: (text: Text) => string,
+  show: Show,
 ): string {
   const rows = items.map((item) =>
     Object.values(item).map((cell) => showCell(cell, show)),
@@ -511,10 +630,7 @@ function renderTable(
     .join("\n");
 }
 
-function showCell(
-  cell: Cell,
-  show: (text: Text) => string,
-): { text: string; tone?: Tone } {
+function showCell(cell: Cell, show: Show): { text: string; tone?: Tone } {
   if (cell === true) return { text: SYMBOL.ok, tone: "ok" };
   if (cell === false) return { text: SYMBOL.skipped, tone: "muted" };
   return { text: show(cell) };

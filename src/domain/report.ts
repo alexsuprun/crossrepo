@@ -27,6 +27,23 @@ export interface FieldItem {
   extra?: Record<string, Text>;
 }
 
+/** One project of a `projects` block. */
+export interface ProjectItem {
+  project: string;
+  branch: string;
+  path: Text;
+  /** In record order. */
+  repos: string[];
+  created?: string;
+}
+
+/** One repo of a `project` block: `present` when its worktree folder exists. */
+export interface ProjectRepoItem {
+  repo: string;
+  path: Text;
+  present: boolean;
+}
+
 /** What a part of the Report is, never how it looks (AD-3). */
 export type Block =
   | { type: "value"; key: string; value: Text | boolean | number }
@@ -40,7 +57,17 @@ export type Block =
       items: { what: string; path: Text; command: Text }[];
     }
   | { type: "section"; key: string; title: Text; blocks: Block[] }
-  | { type: "note"; tone: Tone; text: Text };
+  | { type: "note"; tone: Tone; text: Text }
+  | { type: "projects"; items: ProjectItem[] }
+  | {
+      type: "project";
+      project: string;
+      branch: string;
+      path: Text;
+      codebase: Text;
+      created?: string;
+      repos: ProjectRepoItem[];
+    };
 
 export interface Report {
   blocks: Block[];

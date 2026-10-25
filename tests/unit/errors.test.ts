@@ -51,6 +51,7 @@ describe("ERROR_CODES", () => {
       "no-default-branch",
       "hook-failed",
       "sh-not-found",
+      "project-not-found",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);

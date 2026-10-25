@@ -13,6 +13,8 @@ import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
 import { configShow } from "../commands/config/show.ts";
 import { projectCreate } from "../commands/project/create.ts";
+import { projectInfo } from "../commands/project/info.ts";
+import { projectList } from "../commands/project/list.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
@@ -443,6 +445,23 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .option("--all", "use every repo of the codebase")
     .helpOption("-h, --help", "print this help")
     .action(() => select(projectCreate, create.args, create.opts()));
+  project
+    .command("list")
+    .description("print each project of the codebase with its branch and repos")
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectList));
+  const info: Command = project
+    .command("info")
+    .description("print the branch, folder and repos of one project")
+    // Optional for commander: in a project folder, no name means that project.
+    .argument(
+      "[project]",
+      "the project folder name or branch; default: the current project",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectInfo, info.args));
   return program;
 }
 

@@ -16,7 +16,7 @@ Every command accepts these 4 flags:
 | `--no-interactive` | Never ask questions. A command with a missing argument fails with `missing-argument` instead of opening a picker. |
 | `--verbose` | When `xr` crashes, print the stack trace on stderr. It changes nothing else. |
 
-`xr` asks questions only when stdin and stdout are both a terminal, and neither `--json` nor `--no-interactive` is given. Then a missing argument, for example the repo name of `xr codebase repo remove`, opens a picker on stderr. Pick with the arrow keys and Enter. Ctrl-C or Escape stops the command with `interrupted` (exit code 130) and changes nothing. In every other case, `xr` never reads stdin: a missing argument fails with `missing-argument` and the message lists the choices.
+`xr` asks questions only when stdin and stdout are both a terminal, and neither `--json` nor `--no-interactive` is given. Then a missing argument, for example the repo name of `xr codebase repo remove`, opens a picker on stderr. Pick with the arrow keys and Enter. Ctrl-C or Escape stops the command with `interrupted` (exit code 130) and changes nothing. In every other case, `xr` never reads stdin: a missing argument fails with `missing-argument` and the message lists the choices. One exception: `xr project info` with no project in a codebase folder never opens a picker, also in a terminal. It always fails with `missing-argument`.
 
 ## stdout and stderr
 
@@ -87,7 +87,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | Code | Meaning |
 | --- | --- |
 | `usage` | A bad flag, an unknown command or a missing option value. |
-| `missing-argument` | A command needs an argument that you did not give, and `xr` cannot ask for it (no terminal, `--json` or `--no-interactive`), or there is nothing to pick. The message lists the choices. `error.details` is `{ "argument", "choices" }`, where `choices` is a list of strings, empty when there is nothing to pick. The exit code is 2. |
+| `missing-argument` | A command needs an argument that you did not give, and `xr` cannot ask for it (no terminal, `--json` or `--no-interactive`), or there is nothing to pick. `xr project info` with no project in a codebase folder always gives this error, also in a terminal. The message lists the choices. `error.details` is `{ "argument", "choices" }`, where `choices` is a list of strings, empty when there is nothing to pick. The exit code is 2. |
 | `internal` | A bug in `xr`. Run the command again with `--verbose` and report the output on [GitHub](https://github.com/alexsuprun/crossrepo/issues). |
 | `not-a-codebase` | The folder is not a codebase or a project, or the project's `codebase` path is not a codebase. Use `--codebase-path <path>`. |
 | `config-conflict` | One config level has both a `.yaml` and a `.yml` file. |
@@ -102,7 +102,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `not-in-codebase` | `xr codebase repo add` got a folder that is not directly in the codebase folder. Move the folder into the codebase first. |
 | `repo-not-found` | `xr codebase repo remove` got a name that is not in `repos:` of the codebase config, or `xr project create` got a repo name that is not in the config. |
 | `repo-in-use` | `xr codebase repo remove` got a repo that a project of this codebase uses. `error.details.projects` lists the projects. |
-| `invalid-project-record` | A `.crossrepo/project.yaml` in the projects folder is not valid. The message names the file. |
+| `invalid-project-record` | A `.crossrepo/project.yaml` in the projects folder is not valid. The message names the file. In `xr project list` and `xr project info` it is a warning, and the other projects still show. |
 | `would-lose-work` | `xr codebase repo remove` would delete a repo folder that has uncommitted changes, unpushed commits or stashes, or that has no `.git`. Nothing changes. |
 | `repos-failed` | A command that works on each repo, such as `xr codebase clone` or `xr codebase pull`, had at least one repo that failed. The other repos still ran. `repos` lists each repo as `{ "repo", "status", "message"?, "hint"? }`. |
 | `project-exists` | `xr project create` found a folder at the project path already. `error.details.path` is the path. |
@@ -110,6 +110,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `no-default-branch` | `xr project create` found no default branch for a repo: no `default-branch` in the config and no `origin/HEAD`. |
 | `hook-failed` | A hook line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. |
 | `sh-not-found` | A hook must run, and Windows has no Git for Windows `sh.exe`. |
+| `project-not-found` | No project of this codebase has the given folder name or branch. `error.details.project` is the name. Run `xr project list` to see the projects. |
 | `lock-held` | Another `xr` command that changes files is running in this codebase. The message has its process ID (pid). Wait for it to end, then run the command again. `xr` does not wait or retry. |
 | `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in a picker. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
 

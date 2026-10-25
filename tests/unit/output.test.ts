@@ -936,3 +936,231 @@ describe("repos block source", () => {
     expect(text.written.stdout).toBe("✓ api: local branch\n");
   });
 });
+
+describe("projects block", () => {
+  const P = join(CODEBASE, ".projects");
+  const projects: Block = {
+    type: "projects",
+    items: [
+      {
+        project: "feat--login",
+        branch: "feat/login",
+        path: { path: join(P, "feat--login") },
+        repos: ["api", "web"],
+        created: "2026-10-20T14:03:12Z",
+      },
+      {
+        project: "fix--bug",
+        branch: "fix/bug",
+        path: { path: join(P, "fix--bug") },
+        repos: ["api"],
+        created: "2026-10-18T09:00:00Z",
+      },
+    ],
+  };
+
+  test("text: one aligned row per project with the date, then its repos indented", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [projects] });
+    expect(written.stdout).toBe(
+      [
+        "feat--login  feat/login  2026-10-20",
+        "  api",
+        "  web",
+        "fix--bug     fix/bug     2026-10-18",
+        "  api",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("text: no created gives an empty date and no trailing space", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [
+        {
+          type: "projects",
+          items: [
+            {
+              project: "old",
+              branch: "old",
+              path: { path: join(P, "old") },
+              repos: ["api"],
+            },
+          ],
+        },
+      ],
+    });
+    expect(written.stdout).toBe("old  old\n  api\n");
+  });
+
+  test("text: an empty projects block prints nothing", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [{ type: "projects", items: [] }] });
+    expect(written.stdout).toBe("");
+  });
+
+  test("JSON: entries with the absolute path, full created, and null for no created", () => {
+    const { out, written } = capture("json");
+    out.report({
+      blocks: [projects, { type: "note", tone: "muted", text: "n" }],
+    });
+    expect(JSON.parse(written.stdout)).toEqual({
+      ok: true,
+      warnings: [],
+      entries: [
+        {
+          project: "feat--login",
+          branch: "feat/login",
+          path: join(P, "feat--login"),
+          repos: ["api", "web"],
+          created: "2026-10-20T14:03:12Z",
+        },
+        {
+          project: "fix--bug",
+          branch: "fix/bug",
+          path: join(P, "fix--bug"),
+          repos: ["api"],
+          created: "2026-10-18T09:00:00Z",
+        },
+      ],
+      notes: ["n"],
+    });
+    const empty = capture("json");
+    empty.out.report({
+      blocks: [
+        {
+          type: "projects",
+          items: [
+            { project: "o", branch: "o", path: { path: "/o" }, repos: [] },
+          ],
+        },
+      ],
+    });
+    expect(JSON.parse(empty.written.stdout).entries[0].created).toBeNull();
+  });
+});
+
+describe("project block", () => {
+  const dir = join(CODEBASE, ".projects", "feat--login");
+  const project: Block = {
+    type: "project",
+    project: "feat--login",
+    branch: "feat/login",
+    path: { path: dir },
+    codebase: { path: CODEBASE },
+    created: "2026-10-20T14:03:12Z",
+    repos: [
+      { repo: "api", path: { path: join(dir, "api") }, present: true },
+      { repo: "web", path: { path: join(dir, "web") }, present: true },
+      { repo: "docs", path: { path: join(dir, "docs") }, present: false },
+    ],
+  };
+
+  test("text: aligned label rows, the codebase in ~ form, then the repos with their state", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [project] });
+    expect(written.stdout).toBe(
+      [
+        "project   feat--login",
+        "branch    feat/login",
+        `path      ${join(".projects", "feat--login")}`,
+        `codebase  ${join("~", "code", "shop")}`,
+        "created   2026-10-20T14:03:12Z",
+        "repos",
+        "  ✓ api",
+        "  ✓ web",
+        "  – docs   worktree folder missing",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("text: a codebase outside ~ is absolute; no created gives an empty row", () => {
+    const outside = join(sep, "srv", "shop");
+    const { out, written } = capture("plain", "plain", outside);
+    out.report({
+      blocks: [
+        {
+          type: "project",
+          project: "x",
+          branch: "x",
+          path: { path: join(outside, ".projects", "x") },
+          codebase: { path: outside },
+          repos: [
+            {
+              repo: "api",
+              path: { path: join(outside, ".projects", "x", "api") },
+              present: true,
+            },
+          ],
+        },
+      ],
+    });
+    expect(written.stdout).toBe(
+      [
+        "project   x",
+        "branch    x",
+        `path      ${join(".projects", "x")}`,
+        `codebase  ${outside}`,
+        "created",
+        "repos",
+        "  ✓ api",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("rich text paints the repo states", () => {
+    const { out, written } = capture("rich");
+    out.report({ blocks: [project] });
+    expect(written.stdout).toContain(ESC);
+    expect(written.stdout).toContain("feat--login");
+  });
+
+  test("JSON: flat top-level keys with absolute paths", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [project] });
+    const data = JSON.parse(written.stdout);
+    expect(Object.keys(data)).toEqual([
+      "ok",
+      "warnings",
+      "project",
+      "branch",
+      "path",
+      "codebase",
+      "created",
+      "repos",
+    ]);
+    expect(data).toEqual({
+      ok: true,
+      warnings: [],
+      project: "feat--login",
+      branch: "feat/login",
+      path: dir,
+      codebase: CODEBASE,
+      created: "2026-10-20T14:03:12Z",
+      repos: [
+        { repo: "api", path: join(dir, "api"), present: true },
+        { repo: "web", path: join(dir, "web"), present: true },
+        { repo: "docs", path: join(dir, "docs"), present: false },
+      ],
+    });
+  });
+
+  test("JSON: no created is null, and a key clash with another block throws", () => {
+    const { out, written } = capture("json");
+    const { created: _, ...noCreated } = project as Extract<
+      Block,
+      { type: "project" }
+    >;
+    out.report({ blocks: [noCreated] });
+    expect(JSON.parse(written.stdout).created).toBeNull();
+    const clash = capture("json");
+    expect(() =>
+      clash.out.report({
+        blocks: [project, { type: "value", key: "branch", value: "b" }],
+      }),
+    ).toThrow("branch");
+  });
+});
