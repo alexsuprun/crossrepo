@@ -154,6 +154,21 @@ describe("main", () => {
     expect(info.stdout).toContain("Usage: xr project info [options] [project]");
   });
 
+  test("project remove --help shows [project], --force and --delete-branch", async () => {
+    const result = await run(["project", "remove", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "Usage: xr project remove [options] [project]",
+    );
+    expect(result.stdout).toContain("--force");
+    expect(result.stdout).toContain("--delete-branch");
+  });
+
+  test("project help lists remove", async () => {
+    const result = await run(["project", "--help"]);
+    expect(result.stdout).toContain("remove [options] [project]");
+  });
+
   test("project help lists list and info", async () => {
     const result = await run(["project", "--help"]);
     expect(result.stdout).toContain("list");
@@ -512,6 +527,7 @@ describe("configView", () => {
       projectsDir: base.projectsDir,
       repos: [],
       postCreate: [],
+      preRemove: [],
       vars: {},
     });
   });
@@ -521,11 +537,16 @@ describe("configView", () => {
       ...base,
       values: {
         name: "shop",
-        project: { "post-create": ["a", "b"], vars: { PORT: "5432" } },
+        project: {
+          "post-create": ["a", "b"],
+          "pre-remove": ["c"],
+          vars: { PORT: "5432" },
+        },
       },
     });
     expect(view.name).toBe("shop");
     expect(view.postCreate).toEqual(["a", "b"]);
+    expect(view.preRemove).toEqual(["c"]);
     expect(view.vars).toEqual({ PORT: "5432" });
   });
 });

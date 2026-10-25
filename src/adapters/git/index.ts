@@ -35,6 +35,11 @@ export interface Git {
    */
   lossCheck(dir: string, options?: GitCallOptions): Promise<Loss>;
   /**
+   * Changed, staged and untracked files that are not ignored, in the one
+   * worktree at `dir` (D36). Unpushed commits and stashes do not count. Reads only.
+   */
+  uncommittedFiles(dir: string, options?: GitCallOptions): Promise<string[]>;
+  /**
    * `git -C <dir> fetch origin`. git's output goes to the `stderr` option as it
    * comes; a failure is a `GitError` with its end.
    */
@@ -345,14 +350,7 @@ export function createGit({
       const git = (...rest: string[]) => output(args(rest), signal);
       const count = async (...rest: string[]) =>
         Number((await git("rev-list", "--count", ...rest, "--")).trim());
-      // The flags win over repo config that hides untracked files or submodule changes.
-      const status = await git(
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-        "--ignore-submodules=none",
-      );
+      const status = await output(statusArgs(dir), signal);
       const unpushed: Loss["unpushed"] = [];
       const refs = await git(
         "for-each-ref",
@@ -377,6 +375,9 @@ export function createGit({
       }
       const stashes = lines(await git("stash", "list")).length;
       return { uncommitted: statusPaths(status), unpushed, stashes };
+    },
+    async uncommittedFiles(dir, options) {
+      return statusPaths(await output(statusArgs(dir), options?.signal));
     },
     async fetch(dir, options) {
       await checkVersion();
@@ -451,6 +452,24 @@ export function createGit({
     );
     return hash !== undefined;
   }
+}
+
+/**
+ * `git status` of the worktree at `dir`. `--no-optional-locks`: it must not
+ * refresh and rewrite the index. The flags win over repo config that hides
+ * untracked files or submodule changes.
+ */
+function statusArgs(dir: string): string[] {
+  return [
+    "--no-optional-locks",
+    "-C",
+    dir,
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  ];
 }
 
 /** The worktrees of `git worktree list --porcelain`: one record per worktree, split by an empty line. */

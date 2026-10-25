@@ -162,3 +162,55 @@ describe("createGit worktrees", () => {
     expect((await g.worktreeList(repo)).map((w) => w.branch)).toEqual(["main"]);
   });
 });
+
+describe("createGit uncommittedFiles", () => {
+  test("a clean worktree has none", async () => {
+    const path = join(iso.root, "w");
+    git(repo, "worktree", "add", "--quiet", "-b", "feat/x", path);
+    expect(await adapter().uncommittedFiles(path)).toEqual([]);
+  });
+
+  test("changed, staged and untracked files count; ignored files do not", async () => {
+    const path = join(iso.root, "w");
+    await Bun.write(join(repo, "tracked.txt"), "1\n");
+    await Bun.write(join(repo, ".gitignore"), "*.log\n");
+    git(repo, "add", "tracked.txt", ".gitignore");
+    git(repo, "commit", "--quiet", "-m", "files");
+    git(repo, "worktree", "add", "--quiet", "-b", "feat/x", path);
+    await Bun.write(join(path, "tracked.txt"), "2\n");
+    await Bun.write(join(path, "staged.txt"), "s\n");
+    git(path, "add", "staged.txt");
+    await Bun.write(join(path, "sub", "new.txt"), "n\n");
+    await Bun.write(join(path, "debug.log"), "ignored\n");
+    expect((await adapter().uncommittedFiles(path)).sort()).toEqual([
+      "staged.txt",
+      "sub/new.txt",
+      "tracked.txt",
+    ]);
+  });
+
+  test("unpushed commits and stashes do not count", async () => {
+    const path = join(iso.root, "w");
+    git(repo, "worktree", "add", "--quiet", "-b", "feat/x", path);
+    git(path, "commit", "--quiet", "--allow-empty", "-m", "local only");
+    await Bun.write(join(path, "s.txt"), "s\n");
+    git(path, "add", "s.txt");
+    git(path, "stash", "--quiet");
+    expect(await adapter().uncommittedFiles(path)).toEqual([]);
+  });
+
+  test("only the given worktree counts, not the main one", async () => {
+    const path = join(iso.root, "w");
+    git(repo, "worktree", "add", "--quiet", "-b", "feat/x", path);
+    await Bun.write(join(repo, "main-only.txt"), "m\n");
+    expect(await adapter().uncommittedFiles(path)).toEqual([]);
+    expect(await adapter().uncommittedFiles(repo)).toEqual(["main-only.txt"]);
+  });
+
+  test("a folder that is not a repo is a GitError", async () => {
+    const error = await adapter()
+      .uncommittedFiles(iso.root)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(GitError);
+  });
+});

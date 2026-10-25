@@ -74,6 +74,16 @@ describe("createPrompt interactive", () => {
     expect(terminal.written()).toContain("web");
   });
 
+  test("hints show next to their choice", async () => {
+    const terminal = fakeTerminal({ interactive: true, keys: [ENTER] });
+    const picked = await terminal.prompt.pick({
+      ...request(["feat--login", "fix--bug"]),
+      hints: { "feat--login": "feat/login", "fix--bug": "fix/bug" },
+    });
+    expect(picked).toBe("feat--login");
+    expect(terminal.written()).toContain("feat/login");
+  });
+
   test("arrow down and Enter picks the second choice", async () => {
     const terminal = fakeTerminal({ interactive: true, keys: [DOWN, ENTER] });
     expect(await terminal.prompt.pick(request(["api", "web"]))).toBe("web");

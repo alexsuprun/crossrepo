@@ -43,6 +43,7 @@ function ctx(): Pick<Ctx, "fs" | "config" | "out"> {
       },
       repos: [],
       postCreate: [],
+      preRemove: [],
       vars: {},
     },
   };

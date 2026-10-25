@@ -251,6 +251,41 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
     }
   });
 
+  test("project remove --json in the project folder: xr moves out, then deletes it", () => {
+    const iso = isolate();
+    try {
+      const codebase = join(iso.root, "shop");
+      const remotes = makeRepos(codebase, { api: {} });
+      writeFile(
+        join(codebase, ".crossrepo", "config.yaml"),
+        `repos:\n  api:\n    remote: ${JSON.stringify(remotes.api)}\n    default-branch: main\n`,
+      );
+      const env = { ...process.env };
+      const create = spawnSync(
+        command,
+        [bundle, "project", "create", "feat/x", "--all", "--json"],
+        { encoding: "utf8", cwd: codebase, env },
+      );
+      expect(create.status).toBe(0);
+      const project = join(codebase, ".projects", "feat--x");
+      const result = spawnSync(
+        command,
+        [bundle, "project", "remove", "feat--x", "--json"],
+        { encoding: "utf8", cwd: project, env },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(data.ok).toBe(true);
+      expect(data.notes).toEqual([
+        `Your shell is in a deleted folder. Run \`cd ${codebase}\`.`,
+      ]);
+      expect(existsSync(project)).toBe(false);
+    } finally {
+      iso.restore();
+    }
+  });
+
   test("codebase clone --json clones the missing repo and skips the one on disk", () => {
     const iso = isolate();
     try {
