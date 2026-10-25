@@ -28,6 +28,7 @@ export const ERROR_CODES = [
   "no-default-branch",
   "hook-failed",
   "sh-not-found",
+  "project-not-found",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

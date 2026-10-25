@@ -145,6 +145,21 @@ describe("main", () => {
     expect(result.stdout).toContain("Usage: xr codebase repo list");
   });
 
+  test("project list --help and project info --help print their usage", async () => {
+    const list = await run(["project", "list", "--help"]);
+    expect(list.code).toBe(0);
+    expect(list.stdout).toContain("Usage: xr project list");
+    const info = await run(["project", "info", "--help"]);
+    expect(info.code).toBe(0);
+    expect(info.stdout).toContain("Usage: xr project info [options] [project]");
+  });
+
+  test("project help lists list and info", async () => {
+    const result = await run(["project", "--help"]);
+    expect(result.stdout).toContain("list");
+    expect(result.stdout).toContain("info [project]");
+  });
+
   test("an unknown subcommand or argument is a usage error", async () => {
     for (const argv of [
       ["config", "nope"],

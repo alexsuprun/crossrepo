@@ -25,6 +25,8 @@ export default defineConfig({
 						{ label: 'xr codebase repo remove', slug: 'commands/codebase-repo-remove' },
 						{ label: 'xr config show', slug: 'commands/config-show' },
 						{ label: 'xr project create', slug: 'commands/project-create' },
+						{ label: 'xr project info', slug: 'commands/project-info' },
+						{ label: 'xr project list', slug: 'commands/project-list' },
 					],
 				},
 			],

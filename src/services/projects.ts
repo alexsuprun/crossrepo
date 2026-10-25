@@ -1,7 +1,9 @@
 import { dirname, join, resolve } from "node:path";
 import type { Ctx, Tx } from "../domain/ctx.ts";
+import { PROJECT_LIST_HINT } from "../domain/hints.ts";
 import {
   type NewProjectRecord,
+  type ProjectRecord,
   parseProjectRecord,
   renderProjectRecord,
 } from "../domain/project-record.ts";
@@ -14,41 +16,133 @@ export interface Project {
   repos: string[];
 }
 
+/** One project of a codebase with its full record. */
+export interface ProjectEntry {
+  /** The project folder name in `projects-dir`. */
+  name: string;
+  /** The absolute project folder. */
+  path: string;
+  branch: string;
+  /** In record order. */
+  repos: string[];
+  /** Absent in an old record. */
+  created?: string;
+}
+
+export interface ScanOptions {
+  /** A broken record is a live `invalid-project-record` warning and is skipped, instead of an error. */
+  lenient?: boolean;
+}
+
+type ScanCtx = Pick<Ctx, "fs" | "config" | "out">;
+
 /**
- * The projects of `codebase`: each folder directly in `projects-dir` with a
- * `.crossrepo/project.yaml` whose `codebase` is the same folder (same `dev` and
- * `ino`, D53). A record whose `codebase` does not exist is not a match. A
- * missing `projects-dir` folder has no projects. Throws `invalid-project-record`.
+ * Each folder directly in `projects-dir` with a `.crossrepo/project.yaml` whose
+ * `codebase` is `codebase` (same `dev` and `ino`, D53), in name order. A record
+ * whose `codebase` does not exist is not a match. A missing `projects-dir` has
+ * no projects. A record `parseProjectRecord` refuses goes to `onProblem`.
  */
-export function codebaseProjects(
-  ctx: Pick<Ctx, "fs" | "config">,
+function scan(
+  { fs, config }: Pick<Ctx, "fs" | "config">,
   codebase: string,
-): Project[] {
-  const { fs } = ctx;
-  const dir = ctx.config.projectsDir.resolved;
+  requireBranch: boolean,
+  onProblem: (problem: XrError) => void,
+): { name: string; folder: string; record: ProjectRecord }[] {
+  const dir = config.projectsDir.resolved;
   const self = fs.stat(codebase);
   if (!self || !fs.exists(dir)) return [];
-  const projects: Project[] = [];
+  const found: { name: string; folder: string; record: ProjectRecord }[] = [];
   for (const name of fs.listDirs(dir)) {
     const folder = join(dir, name);
     const file = join(folder, ".crossrepo", "project.yaml");
     const text = fs.readText(file);
     if (text === undefined) continue;
-    // A record from before `branch` was written is still a project here.
-    const record = parseProjectRecord(text, { requireBranch: false });
+    const record = parseProjectRecord(text, { requireBranch });
     if ("problem" in record) {
-      throw new XrError({
-        code: "invalid-project-record",
-        message: `The project record ${file} is not valid: ${record.problem}.`,
-        hint: `Fix ${file}, or remove the project folder ${folder}, then run the command again.`,
-      });
+      onProblem(
+        new XrError({
+          code: "invalid-project-record",
+          message: `The project record ${file} is not valid: ${record.problem}.`,
+          hint: `Fix ${file}, or remove the project folder ${folder}, then run the command again.`,
+        }),
+      );
+      continue;
     }
     const other = fs.stat(resolve(folder, record.codebase));
     if (other && other.dev === self.dev && other.ino === self.ino) {
-      projects.push({ name, repos: record.repos });
+      found.push({ name, folder, record });
     }
   }
-  return projects;
+  return found;
+}
+
+function throwProblem(problem: XrError): never {
+  throw problem;
+}
+
+/**
+ * The projects of `codebase` (see `scan`). A record with no `branch` is still a
+ * project here, for old records. Throws `invalid-project-record`.
+ */
+export function codebaseProjects(
+  ctx: Pick<Ctx, "fs" | "config">,
+  codebase: string,
+): Project[] {
+  return scan(ctx, codebase, false, throwProblem).map(({ name, record }) => ({
+    name,
+    repos: record.repos,
+  }));
+}
+
+/**
+ * The projects of `codebase` with their full records, in name order (see
+ * `scan`). A record that is not valid or has no `branch` throws
+ * `invalid-project-record`, or with `lenient` is a live warning and is skipped.
+ */
+export function projectEntries(
+  ctx: ScanCtx,
+  codebase: string,
+  { lenient = false }: ScanOptions = {},
+): ProjectEntry[] {
+  const onProblem = lenient
+    ? ({ code, message, hint }: XrError) =>
+        ctx.out.emit({ type: "warning", warning: { code, message, hint } })
+    : throwProblem;
+  return scan(ctx, codebase, true, onProblem).map(({ name, folder, record }) =>
+    toEntry(name, folder, record),
+  );
+}
+
+/** The entry of the project in `folder`, from its parsed record. `record.branch` must be set. */
+export function toEntry(
+  name: string,
+  folder: string,
+  { branch = "", repos, created }: ProjectRecord,
+): ProjectEntry {
+  return { name, path: folder, branch, repos, created };
+}
+
+/**
+ * The project whose folder name is `name`, else the one whose record `branch`
+ * is `name`. Throws `project-not-found`.
+ */
+export function findProject(
+  ctx: ScanCtx,
+  codebase: string,
+  name: string,
+  options: ScanOptions = {},
+): ProjectEntry {
+  const entries = projectEntries(ctx, codebase, options);
+  const found =
+    entries.find((entry) => entry.name === name) ??
+    entries.find((entry) => entry.branch === name);
+  if (found) return found;
+  throw new XrError({
+    code: "project-not-found",
+    message: `No project \`${name}\` in this codebase.`,
+    hint: `Run \`${PROJECT_LIST_HINT}\` to see the projects.`,
+    details: { project: name },
+  });
 }
 
 /**
