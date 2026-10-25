@@ -23,6 +23,11 @@ export const ERROR_CODES = [
   "would-lose-work",
   "repos-failed",
   "missing-argument",
+  "project-exists",
+  "branch-in-use",
+  "no-default-branch",
+  "hook-failed",
+  "sh-not-found",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

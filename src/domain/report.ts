@@ -16,6 +16,8 @@ export interface RepoItem {
   status: RepoStatus;
   message?: Text;
   hint?: Text;
+  /** Where the branch of a new worktree came from: `local`, `tracking` or `new`. JSON only. */
+  source?: string;
 }
 
 export interface FieldItem {

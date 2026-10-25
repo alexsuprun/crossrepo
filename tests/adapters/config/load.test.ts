@@ -153,6 +153,32 @@ describe("loadConfig levels", () => {
     expect(entry(config, "projects-dir")?.source).toEqual({ kind: "default" });
   });
 
+  test("project.vars numbers and booleans become text", () => {
+    writeFile(
+      codebaseFile,
+      "project:\n  vars:\n    PORT: 5432\n    DEBUG: true\n    RATE: 1.5\n",
+    );
+    const config = load();
+    expect(config.values.project?.vars).toEqual({
+      PORT: "5432",
+      DEBUG: "true",
+      RATE: "1.5",
+    });
+    expect(entry(config, "project.vars.PORT")?.value).toBe("5432");
+  });
+
+  for (const [what, value] of [
+    ["a list", "[a, b]"],
+    ["a map", "{a: 1}"],
+  ] as const) {
+    test(`a project.vars value that is ${what} is invalid`, () => {
+      writeFile(codebaseFile, `project:\n  vars:\n    X: ${value}\n`);
+      const error = loadError();
+      expect(error.kind).toBe("invalid");
+      expect(error.message).toContain("project.vars.X");
+    });
+  }
+
   test("a CROSSREPO_ name in project.vars does not fail the load", () => {
     writeFile(codebaseFile, "project:\n  vars:\n    CROSSREPO_X: y\n");
     expect(entry(load(), "project.vars.CROSSREPO_X")?.value).toBe("y");

@@ -55,7 +55,7 @@ export function renderCodebaseConfig(repos: readonly ConfigRepo[]): string {
 }
 
 /** One YAML scalar on one line: quoted when plain text would read as something else. */
-function scalar(value: string): string {
+export function scalar(value: string): string {
   return stringify(value, { lineWidth: 0, blockQuote: false }).trimEnd();
 }
 

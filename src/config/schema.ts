@@ -2,12 +2,17 @@ import { z } from "zod";
 
 const text = z.string().nullish();
 const list = z.array(z.string()).nullish();
+/** A `project.vars` value: numbers and booleans become text. */
+const varValue = z
+  .union([z.string(), z.number(), z.boolean()])
+  .transform(String)
+  .nullish();
 
 const repoShape = { remote: text, "default-branch": text, description: text };
 const projectShape = {
   "post-create": list,
   "pre-remove": list,
-  vars: z.record(z.string(), text).nullish(),
+  vars: z.record(z.string(), varValue).nullish(),
 };
 const rootShape = { name: text, "projects-dir": z.string().min(1).nullish() };
 

@@ -1,0 +1,335 @@
+import { basename, join } from "node:path";
+import type { Ctx, HookResult, Tx } from "../domain/ctx.ts";
+import { LIST_HINT } from "../domain/hints.ts";
+import {
+  badBranchChars,
+  branchSlug,
+  hookEnv,
+  hookStepLabel,
+  hookVars,
+  isoSeconds,
+  lastLines,
+} from "../domain/project.ts";
+import type { Block, RepoItem } from "../domain/report.ts";
+import { XrError } from "../errors/index.ts";
+import { projectAgentsText, writeAgentsStep } from "./agents-md.ts";
+import { reposNotReady } from "./codebase-init.ts";
+import { makeProjectFolderStep, writeProjectRecordStep } from "./projects.ts";
+import { repoState } from "./repos.ts";
+import {
+  addWorktreeStep,
+  type BranchChoice,
+  chooseBranch,
+} from "./worktrees.ts";
+
+/** What `xr project create` makes: the branch and the repos in config order. */
+export interface CreatePlan {
+  branch: string;
+  repos: string[];
+}
+
+/** What `xr project create` made. */
+export interface CreatedProject {
+  projectDir: string;
+  branch: string;
+  repos: RepoItem[];
+}
+
+const USAGE_HINT = "Run `xr project create --help` for usage.";
+const CLONE_HINT = "xr codebase clone";
+const HOOK_OUTPUT_LINES = 20;
+
+/**
+ * The argument checks of `xr project create`, then the repo picker when no repo
+ * and no `--all` is given. Runs before the transaction, so no lock is held
+ * while the user picks. Changes nothing.
+ */
+export async function createPlan(
+  ctx: Pick<Ctx, "fs" | "config" | "prompt">,
+  codebase: string,
+  args: readonly (string | undefined)[],
+  { all }: { all: boolean },
+): Promise<CreatePlan> {
+  const [branch, ...names] = args as string[];
+  if (!branch) throw usage("Give the branch of the project.");
+  const bad = badBranchChars(branch);
+  if (bad.length) {
+    throw usage(
+      `The branch \`${branch}\` has ${bad.map((char) => `\`${char}\``).join(", ")}, which a folder name cannot have on Windows.`,
+      'Use a branch name with none of < > : | " ? *.',
+    );
+  }
+  if (all && names.length) {
+    throw usage("Give repo names or `--all`, not both.");
+  }
+  const states = ctx.config.repos.map((repo) =>
+    repoState(ctx.fs, codebase, repo),
+  );
+  if (!all && names.length === 0) {
+    const picked = await ctx.prompt.pickMany({
+      argument: "repos",
+      message: "Pick the repos of the project",
+      choices: states.filter((state) => state.present).map(({ name }) => name),
+      missing: "Give the repos of the project, or `--all`.",
+      listLabel: "Repos",
+      hint: "xr project create <branch> <repo>... | --all",
+      empty: {
+        message: "There is no repo on disk to put in a project.",
+        hint: CLONE_HINT,
+      },
+    });
+    return { branch, repos: picked };
+  }
+  const known = new Set(states.map(({ name }) => name));
+  const unknown = names.find((name) => !known.has(name));
+  if (unknown !== undefined) {
+    throw new XrError({
+      code: "repo-not-found",
+      message: `The codebase has no repo named \`${unknown}\`.`,
+      hint: `See the repos with \`${LIST_HINT}\`.`,
+    });
+  }
+  const wanted = new Set(names);
+  const chosen = all ? states : states.filter(({ name }) => wanted.has(name));
+  if (chosen.length === 0) {
+    throw new XrError({
+      code: "missing-argument",
+      message: "There is no repo on disk to put in a project.",
+      hint: CLONE_HINT,
+      details: { argument: "repos", choices: [] },
+    });
+  }
+  const missing = chosen.filter((state) => !state.present);
+  if (missing.length) {
+    throw reposNotReady(
+      missing.map(({ name }) => ({
+        repo: name,
+        problem: "not on disk",
+        fix: { code: CLONE_HINT },
+      })),
+      `Run \`${CLONE_HINT}\`, then run the command again.`,
+    );
+  }
+  return { branch, repos: chosen.map(({ name }) => name) };
+}
+
+/**
+ * The checks and steps of `xr project create`, run inside a transaction that
+ * holds the lock. The checks change nothing: the project folder is free, each
+ * repo fetches, has a default branch and does not have the branch checked
+ * out, and `sh` is found when `post-create` is set. Then the steps make the
+ * folder, the worktrees, the record, `AGENTS.md`, and run `post-create`.
+ */
+export async function createProject(
+  ctx: Pick<
+    Ctx,
+    "fs" | "git" | "out" | "config" | "hooks" | "env" | "platform" | "now"
+  >,
+  tx: Tx,
+  codebase: string,
+  { branch, repos }: CreatePlan,
+): Promise<CreatedProject> {
+  const { fs, git } = ctx;
+  const slug = branchSlug(branch);
+  const projectDir = join(ctx.config.projectsDir.resolved, slug);
+  const repoDir = (repo: string) => join(codebase, repo);
+  const { signal } = tx;
+
+  if (fs.exists(projectDir)) {
+    throw new XrError({
+      code: "project-exists",
+      message: `The project folder ${projectDir} already exists.`,
+      hint: "Use another branch name, or move or remove that folder, then run the command again.",
+      details: { path: projectDir },
+    });
+  }
+  for (const repo of repos) {
+    await check(ctx, `Fetch ${repo}`, () =>
+      git.fetch(repoDir(repo), { signal }),
+    );
+  }
+  const defaults = new Map<string, string>();
+  for (const repo of repos) {
+    defaults.set(repo, await defaultBranch(ctx, repo, repoDir(repo), signal));
+  }
+  for (const repo of repos) {
+    const user = (await git.worktreeList(repoDir(repo), { signal })).find(
+      (worktree) => worktree.branch === branch,
+    );
+    if (user) {
+      throw new XrError({
+        code: "branch-in-use",
+        message: `The branch \`${branch}\` of \`${repo}\` is checked out in ${user.path}.`,
+        // A folder deleted by hand still has its worktree entry until a prune.
+        hint: fs.exists(user.path)
+          ? "Switch that folder to another branch, or use another branch name, then run the command again."
+          : `Run \`git -C "${repoDir(repo)}" worktree prune\`, then run the command again.`,
+        details: { repo, path: user.path },
+      });
+    }
+  }
+  const postCreate = ctx.config.postCreate;
+  if (postCreate.length) ctx.hooks.findSh();
+  const choices = new Map<string, BranchChoice>();
+  for (const repo of repos) {
+    const start = defaults.get(repo) as string;
+    const choice = await chooseBranch(git, repoDir(repo), branch, start, {
+      signal,
+    });
+    if (
+      choice.source === "new" &&
+      !(await git.remoteBranchExists(repoDir(repo), start, { signal }))
+    ) {
+      throw new XrError({
+        code: "no-default-branch",
+        message: `\`${repo}\` has no \`origin/${start}\`, the default branch to start \`${branch}\` from.`,
+        hint: `Fix \`default-branch\` of \`${repo}\` in the config, or run \`git -C "${repoDir(repo)}" remote set-head origin --auto\`, then run the command again.`,
+        details: { repo },
+      });
+    }
+    choices.set(repo, choice);
+  }
+
+  await makeProjectFolderStep(fs, tx, projectDir);
+  for (const repo of repos) {
+    await addWorktreeStep(ctx, tx, {
+      repo,
+      repoDir: repoDir(repo),
+      path: join(projectDir, repo),
+      branch,
+      choice: choices.get(repo) as BranchChoice,
+    });
+  }
+  await writeProjectRecordStep(fs, tx, projectDir, {
+    branch,
+    codebase,
+    repos,
+    created: isoSeconds(ctx.now()),
+  });
+  const agents = join(projectDir, "AGENTS.md");
+  await writeAgentsStep(
+    fs,
+    tx,
+    agents,
+    projectAgentsText(fs, {
+      projectDir,
+      codebaseDir: codebase,
+      branch,
+      repos,
+      configRepos: ctx.config.repos,
+    }),
+    `rm "${agents}"`,
+  );
+
+  const env = hookEnv(
+    ctx.env,
+    ctx.config.vars,
+    hookVars({
+      codebasePath: codebase,
+      codebaseName: ctx.config.name ?? basename(codebase),
+      projectPath: projectDir,
+      projectName: slug,
+      branch,
+      repos,
+      hook: "post-create",
+    }),
+    ctx.platform,
+  );
+  for (const command of postCreate) {
+    await tx.step(
+      hookStepLabel("post-create", command),
+      async (stepSignal) => {
+        const result = await ctx.hooks.run({
+          command,
+          cwd: projectDir,
+          env,
+          signal: stepSignal,
+        });
+        if (!result.ok) throw hookFailed(command, result);
+      },
+      // Undo never runs a hook (D14), and the line made nothing that xr owns.
+      () => {},
+      {
+        what: "post-create hook",
+        path: projectDir,
+        command: `Undo by hand what \`${command}\` made outside the project folder, if anything.`,
+      },
+    );
+  }
+
+  return {
+    projectDir,
+    branch,
+    repos: repos.map((repo) => {
+      const { source, message } = choices.get(repo) as BranchChoice;
+      return { repo, status: "ok", message, source };
+    }),
+  };
+}
+
+/** A check that shows one step line and changes nothing. */
+async function check(
+  ctx: Pick<Ctx, "out">,
+  label: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  ctx.out.emit({ type: "step-start", text: label });
+  try {
+    await run();
+  } catch (error) {
+    ctx.out.emit({ type: "step-end", text: label, ok: false });
+    throw error;
+  }
+  ctx.out.emit({ type: "step-end", text: label, ok: true });
+}
+
+/** Config `default-branch`, else `origin/HEAD`, else `no-default-branch`. */
+async function defaultBranch(
+  ctx: Pick<Ctx, "config" | "git">,
+  repo: string,
+  dir: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const configured = ctx.config.repos.find(
+    (entry) => entry.name === repo,
+  )?.defaultBranch;
+  const found = configured ?? (await ctx.git.originHead(dir, { signal }));
+  if (found) return found;
+  throw new XrError({
+    code: "no-default-branch",
+    message: `\`${repo}\` has no default branch: the config has no \`default-branch\` for it, and \`origin/HEAD\` is not set.`,
+    hint: `Run \`git -C "${dir}" remote set-head origin --auto\`, or set \`default-branch\` of \`${repo}\` in the config, then run the command again.`,
+    details: { repo },
+  });
+}
+
+function hookFailed(
+  command: string,
+  result: Exclude<HookResult, { ok: true }>,
+): XrError {
+  const why = result.timedOut
+    ? "timed out after 10 minutes"
+    : result.exitCode === null
+      ? "was stopped by a signal"
+      : `failed with exit code ${result.exitCode}`;
+  const output = lastLines(result.output, HOOK_OUTPUT_LINES);
+  const blocks: Block[] = [
+    {
+      type: "section",
+      key: "hookOutput",
+      title: "Hook output",
+      blocks: [{ type: "value", key: "lines", value: output }],
+    },
+  ];
+  return new XrError({
+    code: "hook-failed",
+    message: `The post-create hook \`${command}\` ${why}.`,
+    hint: "Fix the line in `project.post-create` of the config, then run the command again.",
+    details: { command, exitCode: result.exitCode, timedOut: result.timedOut },
+    blocks,
+  });
+}
+
+function usage(message: string, hint = USAGE_HINT): XrError {
+  return new XrError({ code: "usage", message, hint });
+}

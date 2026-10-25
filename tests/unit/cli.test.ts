@@ -496,6 +496,21 @@ describe("configView", () => {
       entries: [],
       projectsDir: base.projectsDir,
       repos: [],
+      postCreate: [],
+      vars: {},
     });
+  });
+
+  test("gives the codebase name, the post-create lines and the vars", () => {
+    const view = configView({
+      ...base,
+      values: {
+        name: "shop",
+        project: { "post-create": ["a", "b"], vars: { PORT: "5432" } },
+      },
+    });
+    expect(view.name).toBe("shop");
+    expect(view.postCreate).toEqual(["a", "b"]);
+    expect(view.vars).toEqual({ PORT: "5432" });
   });
 });

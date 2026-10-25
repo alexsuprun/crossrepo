@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { GitError, XrError } from "../../errors/index.ts";
 
 /** Options of every git call. An aborted `signal` stops git: `GitError` with `exitCode: null`. */
@@ -33,6 +34,65 @@ export interface Git {
    * changes the repo, not even the index.
    */
   lossCheck(dir: string, options?: GitCallOptions): Promise<Loss>;
+  /**
+   * `git -C <dir> fetch origin`. git's output goes to the `stderr` option as it
+   * comes; a failure is a `GitError` with its end.
+   */
+  fetch(dir: string, options?: GitCallOptions): Promise<void>;
+  /** `git worktree list --porcelain`: each worktree, the main one first, with its branch when one is checked out. */
+  worktreeList(dir: string, options?: GitCallOptions): Promise<Worktree[]>;
+  /** `refs/heads/<branch>` exists. */
+  localBranchExists(
+    dir: string,
+    branch: string,
+    options?: GitCallOptions,
+  ): Promise<boolean>;
+  /** `refs/remotes/origin/<branch>` exists. */
+  remoteBranchExists(
+    dir: string,
+    branch: string,
+    options?: GitCallOptions,
+  ): Promise<boolean>;
+  /**
+   * `git worktree add` at `path`, never with `--force`: `local` checks out the
+   * branch, `tracking` makes it with `--track` from `startPoint`, and `new`
+   * makes it with `--no-track` from `startPoint`.
+   */
+  worktreeAdd(
+    dir: string,
+    path: string,
+    add: WorktreeAdd,
+    options?: GitCallOptions,
+  ): Promise<void>;
+  /** `git worktree remove --force <path>`. */
+  worktreeRemove(
+    dir: string,
+    path: string,
+    options?: GitCallOptions,
+  ): Promise<void>;
+  /** `git worktree prune`. */
+  worktreePrune(dir: string, options?: GitCallOptions): Promise<void>;
+  /** `git branch -d <branch>`, or `-D` with `force`. */
+  branchDelete(
+    dir: string,
+    branch: string,
+    options: GitCallOptions & { force: boolean },
+  ): Promise<void>;
+}
+
+/** One worktree of a repo. */
+export interface Worktree {
+  path: string;
+  /** Absent for a detached HEAD or a bare repo. */
+  branch?: string;
+}
+
+/** How `worktreeAdd` gets its branch. */
+export interface WorktreeAdd {
+  branch: string;
+  source: "local" | "tracking" | "new";
+  /** For `tracking` and `new`: the commit the new branch starts at, such as `origin/main`. */
+  startPoint?: string;
 }
 
 /** Work that is only in one repo folder. */
@@ -318,7 +378,100 @@ export function createGit({
       const stashes = lines(await git("stash", "list")).length;
       return { uncommitted: statusPaths(status), unpushed, stashes };
     },
+    async fetch(dir, options) {
+      await checkVersion();
+      const args = [
+        "-C",
+        dir,
+        "fetch",
+        ...(progress ? ["--progress"] : []),
+        "origin",
+      ];
+      const { exitCode, stderr: text } = await stream(args, options?.signal);
+      if (exitCode !== 0) {
+        throw new GitError({
+          args,
+          exitCode,
+          stderr: withoutProgress(text, FETCH_REPORT),
+        });
+      }
+    },
+    async worktreeList(dir, options) {
+      const text = await output(
+        ["-C", dir, "worktree", "list", "--porcelain"],
+        options?.signal,
+      );
+      return parseWorktrees(text);
+    },
+    async localBranchExists(dir, branch, options) {
+      return refExists(dir, `refs/heads/${branch}`, options);
+    },
+    async remoteBranchExists(dir, branch, options) {
+      return refExists(dir, `refs/remotes/origin/${branch}`, options);
+    },
+    async worktreeAdd(dir, path, { branch, source, startPoint }, options) {
+      const args = ["-C", dir, "worktree", "add"];
+      if (source === "local") {
+        args.push(path, branch);
+      } else {
+        if (startPoint === undefined) {
+          throw new Error(`worktreeAdd ${source} needs a start point.`);
+        }
+        const track = source === "tracking" ? "--track" : "--no-track";
+        args.push(track, "-b", branch, path, startPoint);
+      }
+      await output(args, options?.signal);
+    },
+    async worktreeRemove(dir, path, options) {
+      await output(
+        ["-C", dir, "worktree", "remove", "--force", path],
+        options?.signal,
+      );
+    },
+    async worktreePrune(dir, options) {
+      await output(["-C", dir, "worktree", "prune"], options?.signal);
+    },
+    async branchDelete(dir, branch, { force, signal }) {
+      await output(
+        ["-C", dir, "branch", force ? "-D" : "-d", "--", branch],
+        signal,
+      );
+    },
   };
+
+  async function refExists(
+    dir: string,
+    ref: string,
+    options?: GitCallOptions,
+  ): Promise<boolean> {
+    // Exit 1 with --quiet: the ref is missing.
+    const hash = await read(
+      ["-C", dir, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      options?.signal,
+    );
+    return hash !== undefined;
+  }
+}
+
+/** The worktrees of `git worktree list --porcelain`: one record per worktree, split by an empty line. */
+function parseWorktrees(text: string): Worktree[] {
+  const worktrees: Worktree[] = [];
+  for (const record of text.split(/\r?\n\r?\n/)) {
+    let path: string | undefined;
+    let branch: string | undefined;
+    for (const line of record.split(/\r?\n/)) {
+      // `resolve` gives the native form: git writes `C:/x` on Windows.
+      if (line.startsWith("worktree "))
+        path = resolve(line.slice("worktree ".length));
+      if (line.startsWith("branch refs/heads/")) {
+        branch = line.slice("branch refs/heads/".length);
+      }
+    }
+    if (path !== undefined) {
+      worktrees.push(branch === undefined ? { path } : { path, branch });
+    }
+  }
+  return worktrees;
 }
 
 function lines(text: string): string[] {

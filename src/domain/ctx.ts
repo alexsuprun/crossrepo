@@ -33,6 +33,12 @@ export interface ConfigView {
   projectsDir: { value: string; source: ConfigSource; resolved: string };
   /** The merged `repos`, in config order. A key that is not set is `undefined`. */
   repos: ConfigRepoView[];
+  /** The merged `name`, when set. */
+  name?: string;
+  /** The merged `project.post-create` lines, in order. */
+  postCreate: string[];
+  /** The merged `project.vars`; numbers and booleans are text already. */
+  vars: Record<string, string>;
 }
 
 /** One merged entry of `repos`. */
@@ -89,7 +95,52 @@ export interface CtxGit {
     unpushed: { branch: string; count: number }[];
     stashes: number;
   }>;
+  /** `git -C <dir> fetch origin`. git's output goes to stderr. */
+  fetch(dir: string, options?: GitCallOptions): Promise<void>;
+  /** Each worktree of the repo, the main one first, with its branch when one is checked out. */
+  worktreeList(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<{ path: string; branch?: string }[]>;
+  localBranchExists(
+    dir: string,
+    branch: string,
+    options?: GitCallOptions,
+  ): Promise<boolean>;
+  /** `origin/<branch>` exists. */
+  remoteBranchExists(
+    dir: string,
+    branch: string,
+    options?: GitCallOptions,
+  ): Promise<boolean>;
+  /** `git worktree add`, never with `--force`; `tracking` uses `--track`, `new` uses `--no-track`. */
+  worktreeAdd(
+    dir: string,
+    path: string,
+    add: {
+      branch: string;
+      source: BranchSource;
+      startPoint?: string;
+    },
+    options?: GitCallOptions,
+  ): Promise<void>;
+  /** `git worktree remove --force <path>`. */
+  worktreeRemove(
+    dir: string,
+    path: string,
+    options?: GitCallOptions,
+  ): Promise<void>;
+  worktreePrune(dir: string, options?: GitCallOptions): Promise<void>;
+  /** `git branch -d`, or `-D` with `force`. */
+  branchDelete(
+    dir: string,
+    branch: string,
+    options: GitCallOptions & { force: boolean },
+  ): Promise<void>;
 }
+
+/** Where the branch of a new worktree comes from (D37). */
+export type BranchSource = "local" | "tracking" | "new";
 
 /** The PID lock adapter. Only the runners take it. */
 export interface CtxLock {
@@ -120,6 +171,31 @@ export interface PickRequest {
  */
 export interface CtxPrompt {
   pick(request: PickRequest): Promise<string>;
+  /** The marked choices, at least one, in list order. */
+  pickMany(request: PickRequest): Promise<string[]>;
+}
+
+/** What one hook line gave. `output` is the end of its stdout and stderr together. */
+export type HookResult =
+  | { ok: true }
+  | {
+      ok: false;
+      exitCode: number | null;
+      timedOut: boolean;
+      output: string;
+    };
+
+/** The hooks adapter: the only code that starts `sh` (AD-11). */
+export interface CtxHooks {
+  /** The `sh` to use, found once per run. Throws `sh-not-found`. */
+  findSh(): string;
+  /** One `sh -c` line, stdin closed, live output to stderr. An aborted `signal` kills its process tree. */
+  run(line: {
+    command: string;
+    cwd: string;
+    env: Readonly<Record<string, string>>;
+    signal?: AbortSignal;
+  }): Promise<HookResult>;
 }
 
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
@@ -140,6 +216,13 @@ export interface Ctx {
   interrupts: { on(handler: () => void): () => void };
   /** Test only (`XR_TEST_STEP_DELAY_MS`): the runner waits this long after each step. */
   stepDelayMs?: number;
+  hooks: CtxHooks;
+  /** The env `xr` got; hooks inherit it. */
+  env: Readonly<Record<string, string | undefined>>;
+  /** `process.platform`, or a fixed one in tests. */
+  platform: string;
+  /** The clock, fixed in tests. */
+  now(): Date;
 }
 
 /** What a failed undo leaves behind, and the command that removes it by hand. */

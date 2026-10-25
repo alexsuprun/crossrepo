@@ -46,6 +46,11 @@ describe("ERROR_CODES", () => {
       "invalid-project-record",
       "would-lose-work",
       "repos-failed",
+      "project-exists",
+      "branch-in-use",
+      "no-default-branch",
+      "hook-failed",
+      "sh-not-found",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);

@@ -2,8 +2,9 @@ import { join, resolve } from "node:path";
 import { Command, CommanderError } from "commander";
 import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
+import { createHooks } from "../adapters/hooks/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
-import { createPrompt } from "../adapters/prompt/index.ts";
+import { createMultiPrompt, createPrompt } from "../adapters/prompt/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { codebasePull } from "../commands/codebase/pull.ts";
@@ -11,6 +12,7 @@ import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
 import { configShow } from "../commands/config/show.ts";
+import { projectCreate } from "../commands/project/create.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
@@ -46,6 +48,10 @@ export interface MainOptions {
   interrupts?: Interrupts;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
+  /** Default `process.platform`; tests fix it. */
+  platform?: NodeJS.Platform;
+  /** Default the system clock; tests fix it. */
+  now?: () => Date;
 }
 
 /** A Ctrl-C source, as `ctx.interrupts`. */
@@ -199,7 +205,16 @@ async function runCommand(
   options: Readonly<Record<string, unknown>>,
   discovery: Discovery,
   flags: GlobalFlags,
-  { home, env, cwd, isTTY, stderr, interrupts = NO_INTERRUPTS }: MainOptions,
+  {
+    home,
+    env,
+    cwd,
+    isTTY,
+    stderr,
+    interrupts = NO_INTERRUPTS,
+    platform = process.platform,
+    now = () => new Date(),
+  }: MainOptions,
   out: Output,
 ): Promise<Report> {
   // A folder that is not a codebase has no codebase levels, so only the user level loads.
@@ -231,10 +246,18 @@ async function runCommand(
     discovery,
     cwd,
     interactive: flags.interactive,
-    prompt: createPrompt({ interactive: flags.interactive }),
+    prompt: {
+      ...createPrompt({ interactive: flags.interactive }),
+      ...createMultiPrompt({ interactive: flags.interactive }),
+    },
     lock: { path: lockPath(discovery), adapter: createLock() },
     interrupts,
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
+    // Hook output goes to stderr in every mode, so stdout keeps only the Report (AD-4).
+    hooks: createHooks({ platform, env, write: stderr }),
+    env,
+    platform,
+    now,
   };
   return command.run(ctx, args, options);
 }
@@ -256,6 +279,9 @@ export function configView({
       defaultBranch: repo["default-branch"],
       description: repo.description,
     })),
+    ...(values.name === undefined ? {} : { name: values.name }),
+    postCreate: values.project?.["post-create"] ?? [],
+    vars: values.project?.vars ?? {},
   };
 }
 
@@ -399,6 +425,24 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebaseRepoRemove, remove.args, remove.opts()));
+
+  const project: Command = program
+    .command("project")
+    .description("make and change projects")
+    .helpOption("-h, --help", "print this help")
+    .action(() => help(project.helpInformation()));
+  const create: Command = project
+    .command("create")
+    .description(
+      "make a project folder with a worktree of each chosen repo on one branch",
+    )
+    .usage("[options] <branch> [repo...] | <branch> --all")
+    .argument("<branch>", "the branch of the project")
+    // Optional for commander, so no repo and no `--all` opens our picker or gives `missing-argument`.
+    .argument("[repo...]", "the repos of the project; default: pick them")
+    .option("--all", "use every repo of the codebase")
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectCreate, create.args, create.opts()));
   return program;
 }
 

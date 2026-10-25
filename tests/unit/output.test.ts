@@ -335,10 +335,7 @@ describe("report keys", () => {
   });
 
   test("block types without a renderer yet throw", () => {
-    const blocks: Block[] = [
-      { type: "checks", items: [] },
-      { type: "section", key: "s", title: "S", blocks: [] },
-    ];
+    const blocks: Block[] = [{ type: "checks", items: [] }];
     for (const block of blocks) {
       for (const mode of ["json", "plain"] as const) {
         const { out } = capture(mode);
@@ -872,5 +869,70 @@ describe("repos block", () => {
     expect(plain.written.stderr).toEndWith(
       "  xr codebase clone\n\nerror: 1 repo failed.\n",
     );
+  });
+});
+
+describe("section block", () => {
+  const section: Block = {
+    type: "section",
+    key: "hookOutput",
+    title: "Hook output",
+    blocks: [
+      { type: "value", key: "text", value: "line 1\nline 2" },
+      { type: "value", key: "exitCode", value: 3 },
+    ],
+  };
+
+  test("text: the title, then the inner blocks indented by 2", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [section] });
+    expect(written.stdout).toBe(
+      "Hook output\n  line 1\n  line 2\n\n  exitCode: 3\n",
+    );
+  });
+
+  test("JSON: the key holds the data of the inner blocks", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [section] });
+    expect(JSON.parse(written.stdout).hookOutput).toEqual({
+      text: "line 1\nline 2",
+      exitCode: 3,
+    });
+  });
+
+  test("as an error block, it is in error.details and printed after the error", () => {
+    const json = capture("json");
+    json.out.report({
+      blocks: [],
+      error: { code: "hook-failed", message: "m", blocks: [section] },
+    });
+    expect(JSON.parse(json.written.stdout).error.details).toEqual({
+      hookOutput: { text: "line 1\nline 2", exitCode: 3 },
+    });
+    const text = capture("plain");
+    text.out.report({
+      blocks: [],
+      error: { code: "hook-failed", message: "m", blocks: [section] },
+    });
+    expect(text.written.stderr).toContain("Hook output\n  line 1\n  line 2");
+  });
+});
+
+describe("repos block source", () => {
+  test("JSON keeps source when set; text does not show it", () => {
+    const block: Block = {
+      type: "repos",
+      items: [
+        { repo: "api", status: "ok", message: "local branch", source: "local" },
+      ],
+    };
+    const json = capture("json");
+    json.out.report({ blocks: [block] });
+    expect(JSON.parse(json.written.stdout).repos).toEqual([
+      { repo: "api", status: "ok", message: "local branch", source: "local" },
+    ]);
+    const text = capture("plain");
+    text.out.report({ blocks: [block] });
+    expect(text.written.stdout).toBe("✓ api: local branch\n");
   });
 });

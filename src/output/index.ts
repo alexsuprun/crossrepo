@@ -71,6 +71,8 @@ export interface RepoItem {
   status: RepoStatus;
   message?: Text;
   hint?: Text;
+  /** Where the branch of a new worktree came from: `local`, `tracking` or `new`. JSON only. */
+  source?: string;
 }
 
 /** What a part of the Report is, never how it looks. The set is closed (AD-3). */
@@ -306,11 +308,12 @@ function blockData(block: Block): [string, unknown] {
     case "repos":
       return [
         "repos",
-        block.items.map(({ repo, status, message, hint }) => ({
+        block.items.map(({ repo, status, message, hint, source }) => ({
           repo,
           status,
           ...(message === undefined ? {} : { message: jsonText(message) }),
           ...(hint === undefined ? {} : { hint: jsonText(hint) }),
+          ...(source === undefined ? {} : { source }),
         })),
       ];
     case "leftovers":
@@ -322,6 +325,8 @@ function blockData(block: Block): [string, unknown] {
           command: jsonText(command),
         })),
       ];
+    case "section":
+      return [block.key, blocksData(block.blocks, false)];
     default:
       return noRenderer(block);
   }
@@ -417,6 +422,14 @@ function renderBlock(
             `${what}: ${show(path)}\n${paint("muted", `  ${show(command)}`)}`,
         )
         .join("\n");
+    case "section": {
+      const inner = renderBlocks(block.blocks, paint, show).replace(/\n$/, "");
+      const indented = inner
+        .split("\n")
+        .map((text) => (text ? `  ${text}` : text))
+        .join("\n");
+      return inner ? `${show(block.title)}\n${indented}` : show(block.title);
+    }
     default:
       return noRenderer(block);
   }
