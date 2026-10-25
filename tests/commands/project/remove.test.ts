@@ -527,7 +527,7 @@ describe("xr project remove: pre-remove", () => {
   test("runs in the project folder with CROSSREPO_HOOK=pre-remove, before the delete", async () => {
     const out = join(iso.root, "hook.txt");
     preRemove([
-      `{ pwd; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_REPOS"; ls api; } > "${out}"`,
+      `{ basename "$PWD"; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_REPOS"; ls api; } > "${out}"`,
     ]);
     writeFile(join(login, "api", "keep.txt"), "x\n");
     git(join(login, "api"), "add", "keep.txt");
@@ -535,7 +535,7 @@ describe("xr project remove: pre-remove", () => {
     const result = await json([...REMOVE, "feat--login"]);
     expect(result.code).toBe(0);
     expect(readFileSync(out, "utf8").trim().split(/\r?\n/)).toEqual([
-      login,
+      "feat--login",
       "pre-remove",
       "api",
       "web",
