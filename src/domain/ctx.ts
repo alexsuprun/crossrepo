@@ -141,7 +141,27 @@ export interface CtxGit {
     branch: string,
     options: GitCallOptions & { force: boolean },
   ): Promise<void>;
+  /** The checked-out branch, or `undefined` for a detached HEAD. */
+  currentBranch(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<string | undefined>;
+  /** The worktree has a `MERGE_HEAD`. */
+  mergeInProgress(dir: string, options?: GitCallOptions): Promise<boolean>;
+  /** The unmerged files of the worktree. Reads only. */
+  unmergedFiles(dir: string, options?: GitCallOptions): Promise<string[]>;
+  /**
+   * `git merge --autostash --no-edit <ref>`, the only call that can commit. A
+   * conflict stays in git's conflict state; any other failure is a `GitError`.
+   */
+  mergeAutostash(dir: string, ref: string): Promise<MergeResult>;
 }
+
+/** What `mergeAutostash` did; `stashKept`: the uncommitted changes stay in `git stash list`. */
+export type MergeResult =
+  | { result: "up-to-date"; stashKept: boolean }
+  | { result: "merged"; fastForward: boolean; stashKept: boolean }
+  | { result: "conflict"; files: string[]; stashKept: boolean };
 
 /** Where the branch of a new worktree comes from (D37). */
 export type BranchSource = "local" | "tracking" | "new";
@@ -267,6 +287,10 @@ export interface RepoResult {
   status: "ok" | "skipped" | "failed" | "conflict";
   message?: string;
   hint?: string;
+  /** The files with a merge conflict, for a `conflict`. */
+  files?: string[];
+  /** For a `conflict`: the uncommitted changes stay in `git stash list`. */
+  stashKept?: boolean;
   /** What a stopped repo left on disk; the runner lists it as a leftover. */
   leftover?: Leftover;
 }

@@ -79,6 +79,10 @@ export interface RepoItem {
   source?: string;
   /** `xr project remove --delete-branch` deleted the branch. JSON only. */
   branchDeleted?: boolean;
+  /** The files with a merge conflict. JSON only; the message names them. */
+  files?: string[];
+  /** The uncommitted changes stay in `git stash list`. JSON only. */
+  stashKept?: boolean;
 }
 
 /** One project of a `projects` block. */
@@ -164,6 +168,8 @@ export type LiveEvent =
       status: RepoStatus;
       message?: string;
       hint?: string;
+      files?: string[];
+      stashKept?: boolean;
     }
   | { type: "warning"; warning: Warning };
 
@@ -405,13 +411,24 @@ function blockData(block: Block): [string, unknown] {
       return [
         "repos",
         block.items.map(
-          ({ repo, status, message, hint, source, branchDeleted }) => ({
+          ({
+            repo,
+            status,
+            message,
+            hint,
+            source,
+            branchDeleted,
+            files,
+            stashKept,
+          }) => ({
             repo,
             status,
             ...(message === undefined ? {} : { message: jsonText(message) }),
             ...(hint === undefined ? {} : { hint: jsonText(hint) }),
             ...(source === undefined ? {} : { source }),
             ...(branchDeleted === undefined ? {} : { branchDeleted }),
+            ...(files === undefined ? {} : { files }),
+            ...(stashKept === undefined ? {} : { stashKept }),
           }),
         ),
       ];

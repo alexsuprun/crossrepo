@@ -7,7 +7,11 @@ export interface GitCallOptions {
   signal?: AbortSignal;
 }
 
-/** Named git calls, as `ctx.git`. There is no generic `run`, `commit` or `add`. */
+/**
+ * Named git calls, as `ctx.git`. There is no generic `run`, and no `commit`,
+ * `add`, `stash push` or `rebase`: `mergeAutostash` is the only call that can
+ * make a commit (NFR9).
+ */
 export interface Git {
   /** The version from `git version`, such as `2.45.1` or `2.45.1.windows.1`. */
   version(): Promise<string>;
@@ -83,7 +87,32 @@ export interface Git {
     branch: string,
     options: GitCallOptions & { force: boolean },
   ): Promise<void>;
+  /** The branch checked out in the worktree at `dir`, or `undefined` for a detached HEAD. */
+  currentBranch(
+    dir: string,
+    options?: GitCallOptions,
+  ): Promise<string | undefined>;
+  /** The worktree at `dir` has a `MERGE_HEAD`: a merge waits for `--continue` or `--abort`. */
+  mergeInProgress(dir: string, options?: GitCallOptions): Promise<boolean>;
+  /** The unmerged files of the worktree at `dir`, as git gives them. Reads only. */
+  unmergedFiles(dir: string, options?: GitCallOptions): Promise<string[]>;
+  /**
+   * `git merge --autostash --no-edit <ref>` in the worktree at `dir`. A conflict
+   * stays in git's conflict state (D35). Any failure but a conflict is a `GitError`.
+   * It takes no signal, and the merge runs in its own process group, so Ctrl-C
+   * never stops it half way.
+   */
+  mergeAutostash(dir: string, ref: string): Promise<MergeResult>;
 }
+
+/**
+ * What `mergeAutostash` did. `stashKept`: the merge passed, but the uncommitted
+ * changes did not apply on top, so they stay in `git stash list`.
+ */
+export type MergeResult =
+  | { result: "up-to-date"; stashKept: boolean }
+  | { result: "merged"; fastForward: boolean; stashKept: boolean }
+  | { result: "conflict"; files: string[]; stashKept: boolean };
 
 /** One worktree of a repo. */
 export interface Worktree {
@@ -113,9 +142,9 @@ export interface CreateGitOptions {
   /** When false, git may never wait for a password or a prompt. */
   interactive: boolean;
   env: Readonly<Record<string, string | undefined>>;
-  /** Gets git's live stderr of `clone` and `pull`. Default: the process stderr. */
+  /** Gets git's live stderr of `clone`, `pull` and `fetch`. Default: the process stderr. */
   stderr?: (text: string) => void;
-  /** Adds `--progress` to `clone` and `pull`; set it only when the process stderr is a TTY. */
+  /** Adds `--progress` to `clone`, `pull` and `fetch`; set it only when the process stderr is a TTY. */
   progress?: boolean;
 }
 
@@ -180,6 +209,53 @@ export function createGit({
           );
         },
       );
+    });
+  }
+
+  /**
+   * Like `exec` with no signal, but git runs in its own process group (POSIX),
+   * so a Ctrl-C in the terminal never reaches it. `execFile` ignores `detached`.
+   */
+  function execOwnGroup(
+    args: readonly string[],
+  ): Promise<Omit<Result, "stdout">> {
+    return new Promise((resolve, reject) => {
+      const child = spawn("git", args, {
+        env: gitEnv,
+        windowsHide: true,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) =>
+        reject(
+          new GitError({
+            args,
+            exitCode: null,
+            stderr:
+              (error as { code?: unknown }).code === "ENOENT"
+                ? "git was not found on PATH. Install git 2.27 or newer."
+                : error.message,
+          }),
+        ),
+      );
+      child.on("close", (code) => {
+        if (code === null) {
+          reject(
+            new GitError({
+              args,
+              exitCode: null,
+              stderr: "Stopped by a signal.",
+            }),
+          );
+          return;
+        }
+        resolve({ exitCode: code, stderr });
+      });
     });
   }
 
@@ -438,7 +514,64 @@ export function createGit({
         signal,
       );
     },
+    async currentBranch(dir, options) {
+      // Exit 1 with --quiet: HEAD is detached. No `--short`: it gives
+      // `heads/<b>` when a tag has the same name.
+      const ref = await read(
+        ["-C", dir, "symbolic-ref", "--quiet", "HEAD"],
+        options?.signal,
+      );
+      return ref?.replace(/^refs\/heads\//, "");
+    },
+    async mergeInProgress(dir, options) {
+      return (await revision(dir, "MERGE_HEAD", options?.signal)) !== undefined;
+    },
+    async unmergedFiles(dir, options) {
+      return unmerged(dir, options?.signal);
+    },
+    async mergeAutostash(dir, ref) {
+      // `refs/stash` is shared by the worktrees of a repo; callers hold the lock.
+      const stashBefore = await revision(dir, "refs/stash");
+      const headBefore = await revision(dir, "HEAD");
+      const args = ["-C", dir, "merge", "--autostash", "--no-edit", ref];
+      // Never the signal: a Ctrl-C must not stop a merge half way.
+      const { exitCode, stderr } = await execOwnGroup(args);
+      const stashKept = (await revision(dir, "refs/stash")) !== stashBefore;
+      if (exitCode !== 0) {
+        if ((await revision(dir, "MERGE_HEAD")) === undefined) {
+          throw new GitError({ args, exitCode, stderr });
+        }
+        const files = await unmerged(dir);
+        // A failing `pre-merge-commit` hook leaves `MERGE_HEAD` with no conflict.
+        if (!files.length) throw new GitError({ args, exitCode, stderr });
+        return { result: "conflict", files, stashKept };
+      }
+      const headAfter = await revision(dir, "HEAD");
+      if (headAfter === headBefore) return { result: "up-to-date", stashKept };
+      const fastForward = headAfter === (await revision(dir, ref));
+      return { result: "merged", fastForward, stashKept };
+    },
   };
+
+  async function unmerged(
+    dir: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const text = await output(
+      ["-C", dir, "diff", "--name-only", "-z", "--diff-filter=U"],
+      signal,
+    );
+    return text.split("\0").filter(Boolean);
+  }
+
+  /** The commit of `ref`, or `undefined` when it does not exist. */
+  async function revision(
+    dir: string,
+    ref: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    return read(["-C", dir, "rev-parse", "--quiet", "--verify", ref], signal);
+  }
 
   async function refExists(
     dir: string,

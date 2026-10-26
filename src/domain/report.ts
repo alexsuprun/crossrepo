@@ -26,6 +26,10 @@ export interface RepoItem {
   source?: string;
   /** `xr project remove --delete-branch` deleted the branch. JSON only. */
   branchDeleted?: boolean;
+  /** The files with a merge conflict. JSON only; the message names them. */
+  files?: string[];
+  /** The uncommitted changes stay in `git stash list`. JSON only. */
+  stashKept?: boolean;
 }
 
 export interface FieldItem {
@@ -111,5 +115,7 @@ export type LiveEvent =
       status: RepoStatus;
       message?: string;
       hint?: string;
+      files?: string[];
+      stashKept?: boolean;
     }
   | { type: "warning"; warning: Warning };

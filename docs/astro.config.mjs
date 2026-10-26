@@ -31,6 +31,7 @@ export default defineConfig({
 						{ label: 'xr project repo add', slug: 'commands/project-repo-add' },
 						{ label: 'xr project repo list', slug: 'commands/project-repo-list' },
 						{ label: 'xr project repo remove', slug: 'commands/project-repo-remove' },
+						{ label: 'xr project sync', slug: 'commands/project-sync' },
 					],
 				},
 			],

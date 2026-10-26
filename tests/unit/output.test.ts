@@ -937,6 +937,72 @@ describe("repos block source", () => {
   });
 });
 
+describe("repos block conflict", () => {
+  const block: Block = {
+    type: "repos",
+    items: [
+      {
+        repo: "api",
+        status: "conflict",
+        message: "merge conflict in 1 file: `a.ts`",
+        hint: "fix the files",
+        files: ["a.ts"],
+      },
+      {
+        repo: "web",
+        status: "conflict",
+        message: "merged origin/main, but your changes conflict with it",
+        stashKept: true,
+      },
+    ],
+  };
+
+  test("JSON keeps files and stashKept when set", () => {
+    const json = capture("json");
+    json.out.report({ blocks: [block] });
+    expect(JSON.parse(json.written.stdout).repos).toEqual([
+      {
+        repo: "api",
+        status: "conflict",
+        message: "merge conflict in 1 file: `a.ts`",
+        hint: "fix the files",
+        files: ["a.ts"],
+      },
+      {
+        repo: "web",
+        status: "conflict",
+        message: "merged origin/main, but your changes conflict with it",
+        stashKept: true,
+      },
+    ]);
+  });
+
+  test("text shows ! for a conflict, and no extra lines for files or stashKept", () => {
+    const text = capture("plain");
+    text.out.report({ blocks: [block] });
+    expect(text.written.stdout).toBe(
+      [
+        "! api: merge conflict in 1 file: `a.ts`",
+        "  fix the files",
+        "! web: merged origin/main, but your changes conflict with it",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("the live repo event shows a conflict with !", () => {
+    const { out, written } = capture("plain");
+    out.emit({
+      type: "repo",
+      repo: "api",
+      status: "conflict",
+      message: "merge conflict in 1 file: `a.ts`",
+      files: ["a.ts"],
+    });
+    expect(written.stderr).toBe("! api: merge conflict in 1 file: `a.ts`\n");
+  });
+});
+
 describe("projects block", () => {
   const P = join(CODEBASE, ".projects");
   const projects: Block = {
