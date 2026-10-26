@@ -20,8 +20,8 @@ export interface NewProjectRecord {
   codebase: string;
   /** In codebase config order, as written; at least one. */
   repos: readonly string[];
-  /** ISO 8601 UTC to the second with `Z`. */
-  created: string;
+  /** ISO 8601 UTC to the second with `Z`. `undefined` only when an old record without it is written again. */
+  created: string | undefined;
 }
 
 export interface ParseRecordOptions {
@@ -75,14 +75,16 @@ export function parseProjectRecord(
   return noRepos;
 }
 
-/** The text of a new `.crossrepo/project.yaml`: `branch`, `codebase`, `repos`, `created`, in that order. */
+/** The text of a `.crossrepo/project.yaml`: `branch`, `codebase`, `repos`, `created`, in that order. */
 export function renderProjectRecord(record: NewProjectRecord): string {
   return [
     `branch: ${scalar(record.branch)}`,
     `codebase: ${scalar(record.codebase)}`,
     "repos:",
     ...record.repos.map((name) => `  - ${scalar(name)}`),
-    `created: ${scalar(record.created)}`,
+    ...(record.created === undefined
+      ? []
+      : [`created: ${scalar(record.created)}`]),
     "",
   ].join("\n");
 }

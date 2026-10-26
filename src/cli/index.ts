@@ -16,6 +16,9 @@ import { projectCreate } from "../commands/project/create.ts";
 import { projectInfo } from "../commands/project/info.ts";
 import { projectList } from "../commands/project/list.ts";
 import { projectRemove } from "../commands/project/remove.ts";
+import { projectRepoAdd } from "../commands/project/repo/add.ts";
+import { projectRepoList } from "../commands/project/repo/list.ts";
+import { projectRepoRemove } from "../commands/project/repo/remove.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
@@ -488,6 +491,49 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .action(() =>
       select(projectRemove, removeProject.args, removeProject.opts()),
     );
+  const projectRepo: Command = project
+    .command("repo")
+    .description("change and list the repos of a project")
+    .helpOption("-h, --help", "print this help")
+    .action(() => help(projectRepo.helpInformation()));
+  const PROJECT_FLAG = "--project <project>";
+  const PROJECT_TEXT =
+    "the project folder name or branch; default: the current project";
+  const repoAdd: Command = projectRepo
+    .command("add")
+    .description("add a worktree of each repo to the project")
+    // Optional for commander, so no repo opens our picker or gives `missing-argument`.
+    .argument("[repos...]", "the repos to add; default: pick them")
+    .option(PROJECT_FLAG, PROJECT_TEXT)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectRepoAdd, repoAdd.args, repoAdd.opts()));
+  const repoRemove: Command = projectRepo
+    .command("remove")
+    .description("remove the worktree of each repo from the project")
+    // Optional for commander, so no repo opens our picker or gives `missing-argument`.
+    .argument("[repos...]", "the repos to remove; default: pick them")
+    .option(PROJECT_FLAG, PROJECT_TEXT)
+    .option(
+      "--force",
+      "remove worktrees even when they have uncommitted changes",
+    )
+    .option(
+      "--delete-branch",
+      "also delete each merged branch with `git branch -d`",
+    )
+    .helpOption("-h, --help", "print this help")
+    .action(() =>
+      select(projectRepoRemove, repoRemove.args, repoRemove.opts()),
+    );
+  const repoList: Command = projectRepo
+    .command("list")
+    .description(
+      "print each repo of the project and whether its worktree folder exists",
+    )
+    .option(PROJECT_FLAG, PROJECT_TEXT)
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectRepoList, [], repoList.opts()));
   return program;
 }
 

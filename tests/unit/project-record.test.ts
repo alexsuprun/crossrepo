@@ -117,4 +117,15 @@ describe("renderProjectRecord", () => {
     expect(text).toContain('branch: "123"');
     expect(parseRecord(text)).toEqual(record);
   });
+
+  test("no created: the key is left out, as in an old record", () => {
+    expect(
+      renderProjectRecord({
+        branch: "x",
+        codebase: "/c",
+        repos: ["api"],
+        created: undefined,
+      }),
+    ).toBe("branch: x\ncodebase: /c\nrepos:\n  - api\n");
+  });
 });

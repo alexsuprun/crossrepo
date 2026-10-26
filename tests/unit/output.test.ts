@@ -1236,3 +1236,81 @@ describe("a note made of parts", () => {
     ]);
   });
 });
+
+describe("project-repos block", () => {
+  const dir = join(CODEBASE, ".projects", "feat--login");
+  const block: Block = {
+    type: "project-repos",
+    project: "feat--login",
+    entries: [
+      {
+        repo: "api",
+        path: { path: join(dir, "api") },
+        present: true,
+        description: "Public REST API",
+      },
+      {
+        repo: "web",
+        path: { path: join(dir, "web") },
+        present: true,
+      },
+      {
+        repo: "docs",
+        path: { path: join(dir, "docs") },
+        present: false,
+        description: "Docs site",
+      },
+    ],
+  };
+
+  test("text: mark, padded name, then the description or the missing folder", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [block] });
+    expect(written.stdout).toBe(
+      [
+        "✓ api    Public REST API",
+        "✓ web",
+        "– docs   worktree folder missing",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("rich text paints the marks", () => {
+    const { out, written } = capture("rich");
+    out.report({ blocks: [block] });
+    expect(written.stdout).toContain(ESC);
+  });
+
+  test("JSON: project and entries at the top level, absolute paths, null description", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [block] });
+    expect(written.stdout).toBe(
+      `${JSON.stringify({
+        ok: true,
+        warnings: [],
+        project: "feat--login",
+        entries: [
+          {
+            repo: "api",
+            path: join(dir, "api"),
+            present: true,
+            description: "Public REST API",
+          },
+          {
+            repo: "web",
+            path: join(dir, "web"),
+            present: true,
+            description: null,
+          },
+          {
+            repo: "docs",
+            path: join(dir, "docs"),
+            present: false,
+            description: "Docs site",
+          },
+        ],
+      })}\n`,
+    );
+  });
+});

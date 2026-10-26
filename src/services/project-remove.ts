@@ -5,7 +5,7 @@ import { hookEnv, hookVars } from "../domain/project.ts";
 import type { RepoItem } from "../domain/report.ts";
 import { GitError, XrError } from "../errors/index.ts";
 import { runHookSteps } from "./hooks.ts";
-import { findProject, type ProjectEntry, projectEntries } from "./projects.ts";
+import { findProject, type ProjectEntry, pickProject } from "./projects.ts";
 
 /** The flags of `xr project remove`. */
 export interface ProjectRemoveOptions {
@@ -42,23 +42,11 @@ export async function removeTarget(
   if (name !== undefined) {
     return findProject(ctx, codebase, name, { lenient: true });
   }
-  const entries = projectEntries(ctx, codebase, { lenient: true });
-  const picked = await ctx.prompt.pick({
-    argument: "project",
+  return pickProject(ctx, codebase, {
     message: "Pick the project to remove",
-    choices: entries.map((entry) => entry.name),
-    hints: Object.fromEntries(
-      entries.map((entry) => [entry.name, entry.branch]),
-    ),
     missing: "Give the project to remove.",
-    listLabel: "Projects",
     hint: "xr project remove <project>",
-    empty: {
-      message: "There is no project in this codebase.",
-      hint: "Start one with `xr project create <branch> <repo>...`.",
-    },
   });
-  return entries.find((entry) => entry.name === picked) as ProjectEntry;
 }
 
 /**
@@ -86,10 +74,9 @@ export async function removeProject(
   project: ProjectEntry,
   { force, deleteBranch }: ProjectRemoveOptions,
 ): Promise<RemovedProject> {
-  const { fs, git } = ctx;
+  const { fs } = ctx;
   const { path: projectDir, branch, repos } = project;
   const { signal } = tx;
-  const repoDir = (repo: string) => join(codebase, repo);
   const worktree = (repo: string) => join(projectDir, repo);
 
   if (!fs.exists(join(projectDir, ".crossrepo", "project.yaml"))) {
@@ -103,13 +90,17 @@ export async function removeProject(
   checkDrift(fs, projectDir, repos);
   const missing = new Set(repos.filter((repo) => !fs.exists(worktree(repo))));
   if (!force) {
-    const changed: { repo: string; path: string; files: string[] }[] = [];
-    for (const repo of repos) {
-      if (missing.has(repo)) continue;
-      const files = await git.uncommittedFiles(worktree(repo), { signal });
-      if (files.length) changed.push({ repo, path: worktree(repo), files });
-    }
-    if (changed.length) throw uncommittedChanges(project.name, changed);
+    await checkUncommitted(
+      ctx,
+      signal,
+      repos
+        .filter((repo) => !missing.has(repo))
+        .map((repo) => ({ repo, path: worktree(repo) })),
+      {
+        lead: "Removing the project",
+        hint: `Commit or stash the changes, then run the command again. Or run \`xr project remove ${project.name} --force\` to remove the project anyway.`,
+      },
+    );
   }
   const preRemove = ctx.config.preRemove;
   if (preRemove.length) ctx.hooks.findSh();
@@ -142,40 +133,13 @@ export async function removeProject(
   if (movedOut) ctx.chdir(codebase);
 
   const branchResults = new Map<string, BranchResult>();
-  const worktreeSteps: FinalStep[] = repos.map((repo) => {
-    const dir = repoDir(repo);
-    const path = worktree(repo);
-    const gone = missing.has(repo);
-    return {
-      label: gone
-        ? `Remove worktree ${repo} (worktree folder missing)`
-        : `Remove worktree ${repo}`,
-      run: () =>
-        gone ? git.worktreePrune(dir) : git.worktreeRemove(dir, path),
-      manualCleanup: {
-        what: `worktree of ${repo}`,
-        path,
-        command: gone
-          ? `git -C "${dir}" worktree prune`
-          : `git -C "${dir}" worktree remove --force "${path}"`,
-      },
-    };
-  });
-  const branchSteps: FinalStep[] = deleteBranch
-    ? repos.map((repo) => {
-        const dir = repoDir(repo);
-        return {
-          label: `Delete branch ${repo}`,
-          run: async () => {
-            branchResults.set(repo, await deleteMergedBranch(ctx, dir, branch));
-          },
-          manualCleanup: {
-            what: `branch ${branch} of ${repo}`,
-            path: dir,
-            command: `git -C "${dir}" branch -d ${branch}`,
-          },
-        };
-      })
+  const worktreeSteps = repos.map((repo) =>
+    removeWorktreeFinal(ctx, codebase, projectDir, repo, missing.has(repo)),
+  );
+  const branchSteps = deleteBranch
+    ? repos.map((repo) =>
+        deleteBranchFinal(ctx, codebase, repo, branch, branchResults),
+      )
     : [];
   await tx.finals([
     ...worktreeSteps,
@@ -195,31 +159,91 @@ export async function removeProject(
     projectDir,
     branch,
     movedOut,
-    repos: repos.map((repo) => {
-      const head = missing.has(repo)
-        ? "worktree folder missing, git entry pruned"
-        : "worktree removed";
-      const result = branchResults.get(repo);
-      if (!result) {
-        return {
-          repo,
-          status: "ok",
-          message: missing.has(repo) ? head : `${head}, branch kept`,
-          branchDeleted: false,
-        };
-      }
-      return {
-        repo,
-        status: "ok",
-        message: `${head}, ${BRANCH_MESSAGES[result.kind]}`,
-        ...(result.kind === "not-merged" ? { hint: result.hint } : {}),
-        branchDeleted: result.kind === "deleted",
-      };
-    }),
+    repos: repos.map((repo) =>
+      removedRepoItem(repo, missing.has(repo), branchResults.get(repo)),
+    ),
   };
 }
 
-type BranchResult =
+/**
+ * The "Remove worktree `<repo>`" final step: `git worktree remove --force`, or
+ * `git worktree prune` when the worktree folder is `gone`.
+ */
+export function removeWorktreeFinal(
+  ctx: Pick<Ctx, "git">,
+  codebase: string,
+  projectDir: string,
+  repo: string,
+  gone: boolean,
+): FinalStep {
+  const dir = join(codebase, repo);
+  const path = join(projectDir, repo);
+  return {
+    label: gone
+      ? `Remove worktree ${repo} (worktree folder missing)`
+      : `Remove worktree ${repo}`,
+    run: () =>
+      gone ? ctx.git.worktreePrune(dir) : ctx.git.worktreeRemove(dir, path),
+    manualCleanup: {
+      what: `worktree of ${repo}`,
+      path,
+      command: gone
+        ? `git -C "${dir}" worktree prune`
+        : `git -C "${dir}" worktree remove --force "${path}"`,
+    },
+  };
+}
+
+/** The "Delete branch `<repo>`" final step (see `deleteMergedBranch`). Its result goes to `results`. */
+export function deleteBranchFinal(
+  ctx: Pick<Ctx, "git" | "out">,
+  codebase: string,
+  repo: string,
+  branch: string,
+  results: Map<string, BranchResult>,
+): FinalStep {
+  const dir = join(codebase, repo);
+  return {
+    label: `Delete branch ${repo}`,
+    run: async () => {
+      results.set(repo, await deleteMergedBranch(ctx, dir, branch));
+    },
+    manualCleanup: {
+      what: `branch ${branch} of ${repo}`,
+      path: dir,
+      command: `git -C "${dir}" branch -d ${branch}`,
+    },
+  };
+}
+
+/** The `repos` item of a removed worktree. `branch` is the result of its branch step, if it ran. */
+export function removedRepoItem(
+  repo: string,
+  missing: boolean,
+  branch: BranchResult | undefined,
+): RepoItem {
+  const head = missing
+    ? "worktree folder missing, git entry pruned"
+    : "worktree removed";
+  if (!branch) {
+    return {
+      repo,
+      status: "ok",
+      message: missing ? head : `${head}, branch kept`,
+      branchDeleted: false,
+    };
+  }
+  return {
+    repo,
+    status: "ok",
+    message: `${head}, ${BRANCH_MESSAGES[branch.kind]}`,
+    ...(branch.kind === "not-merged" ? { hint: branch.hint } : {}),
+    branchDeleted: branch.kind === "deleted",
+  };
+}
+
+/** What the branch step of a repo did. */
+export type BranchResult =
   | { kind: "deleted" }
   | { kind: "gone" }
   | { kind: "not-merged"; hint: string };
@@ -288,9 +312,34 @@ function checkDrift(
   });
 }
 
+/** The texts of the `uncommitted-changes` error. */
+export interface UncommittedTexts {
+  /** The start of the message, such as `Removing the project`. */
+  lead: string;
+  hint: string;
+}
+
+/**
+ * `uncommitted-changes` when a worktree has changed, staged or untracked files
+ * that are not ignored (D36). Reads only.
+ */
+export async function checkUncommitted(
+  ctx: Pick<Ctx, "git">,
+  signal: AbortSignal,
+  worktrees: readonly { repo: string; path: string }[],
+  texts: UncommittedTexts,
+): Promise<void> {
+  const changed: { repo: string; path: string; files: string[] }[] = [];
+  for (const { repo, path } of worktrees) {
+    const files = await ctx.git.uncommittedFiles(path, { signal });
+    if (files.length) changed.push({ repo, path, files });
+  }
+  if (changed.length) throw uncommittedChanges(changed, texts);
+}
+
 function uncommittedChanges(
-  name: string,
   worktrees: { repo: string; path: string; files: string[] }[],
+  { lead, hint }: UncommittedTexts,
 ): XrError {
   const lines = worktrees.map(({ repo, path, files }) => {
     const shown = files.slice(0, SHOWN_FILES).join(", ");
@@ -303,17 +352,14 @@ function uncommittedChanges(
   });
   return new XrError({
     code: "uncommitted-changes",
-    message: [
-      "Removing the project would lose uncommitted changes:",
-      ...lines,
-    ].join("\n"),
-    hint: `Commit or stash the changes, then run the command again. Or run \`xr project remove ${name} --force\` to remove the project anyway.`,
+    message: [`${lead} would lose uncommitted changes:`, ...lines].join("\n"),
+    hint,
     details: { worktrees },
   });
 }
 
 /** `dir` is `folder` or inside it, with symlinks resolved when the paths exist. */
-function isInside(fs: Ctx["fs"], folder: string, dir: string): boolean {
+export function isInside(fs: Ctx["fs"], folder: string, dir: string): boolean {
   const real = (path: string) => {
     try {
       return fs.realpath(path);

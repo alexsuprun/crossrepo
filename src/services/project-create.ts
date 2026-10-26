@@ -14,7 +14,7 @@ import { projectAgentsText, writeAgentsStep } from "./agents-md.ts";
 import { reposNotReady } from "./codebase-init.ts";
 import { runHookSteps } from "./hooks.ts";
 import { makeProjectFolderStep, writeProjectRecordStep } from "./projects.ts";
-import { repoState } from "./repos.ts";
+import { type RepoState, repoState } from "./repos.ts";
 import {
   addWorktreeStep,
   type BranchChoice,
@@ -35,7 +35,8 @@ export interface CreatedProject {
 }
 
 const USAGE_HINT = "Run `xr project create --help` for usage.";
-const CLONE_HINT = "xr codebase clone";
+/** The command that puts the missing repos on disk. */
+export const CLONE_HINT = "xr codebase clone";
 
 /**
  * The argument checks of `xr project create`, then the repo picker when no repo
@@ -78,15 +79,7 @@ export async function createPlan(
     });
     return { branch, repos: picked };
   }
-  const known = new Set(states.map(({ name }) => name));
-  const unknown = names.find((name) => !known.has(name));
-  if (unknown !== undefined) {
-    throw new XrError({
-      code: "repo-not-found",
-      message: `The codebase has no repo named \`${unknown}\`.`,
-      hint: `See the repos with \`${LIST_HINT}\`.`,
-    });
-  }
+  checkKnownRepos(states, names);
   const wanted = new Set(names);
   const chosen = all ? states : states.filter(({ name }) => wanted.has(name));
   if (chosen.length === 0) {
@@ -97,7 +90,29 @@ export async function createPlan(
       details: { argument: "repos", choices: [] },
     });
   }
-  const missing = chosen.filter((state) => !state.present);
+  checkReposOnDisk(chosen);
+  return { branch, repos: chosen.map(({ name }) => name) };
+}
+
+/** `repo-not-found` for the first of `names` that is not a repo of the merged config. */
+export function checkKnownRepos(
+  states: readonly RepoState[],
+  names: readonly string[],
+): void {
+  const known = new Set(states.map(({ name }) => name));
+  const unknown = names.find((name) => !known.has(name));
+  if (unknown !== undefined) {
+    throw new XrError({
+      code: "repo-not-found",
+      message: `The codebase has no repo named \`${unknown}\`.`,
+      hint: `See the repos with \`${LIST_HINT}\`.`,
+    });
+  }
+}
+
+/** `repos-not-ready` with the clone hint when one of `states` is not on disk. */
+export function checkReposOnDisk(states: readonly RepoState[]): void {
+  const missing = states.filter((state) => !state.present);
   if (missing.length) {
     throw reposNotReady(
       missing.map(({ name }) => ({
@@ -108,7 +123,6 @@ export async function createPlan(
       `Run \`${CLONE_HINT}\`, then run the command again.`,
     );
   }
-  return { branch, repos: chosen.map(({ name }) => name) };
 }
 
 /**
@@ -127,7 +141,7 @@ export async function createProject(
   codebase: string,
   { branch, repos }: CreatePlan,
 ): Promise<CreatedProject> {
-  const { fs, git } = ctx;
+  const { fs } = ctx;
   const slug = branchSlug(branch);
   const projectDir = join(ctx.config.projectsDir.resolved, slug);
   const repoDir = (repo: string) => join(codebase, repo);
@@ -141,52 +155,23 @@ export async function createProject(
       details: { path: projectDir },
     });
   }
-  for (const repo of repos) {
-    await check(ctx, `Fetch ${repo}`, () =>
-      git.fetch(repoDir(repo), { signal }),
-    );
-  }
-  const defaults = new Map<string, string>();
-  for (const repo of repos) {
-    defaults.set(repo, await defaultBranch(ctx, repo, repoDir(repo), signal));
-  }
-  for (const repo of repos) {
-    const user = (await git.worktreeList(repoDir(repo), { signal })).find(
-      (worktree) => worktree.branch === branch,
-    );
-    if (user) {
-      throw new XrError({
-        code: "branch-in-use",
-        message: `The branch \`${branch}\` of \`${repo}\` is checked out in ${user.path}.`,
-        // A folder deleted by hand still has its worktree entry until a prune.
-        hint: fs.exists(user.path)
-          ? "Switch that folder to another branch, or use another branch name, then run the command again."
-          : `Run \`git -C "${repoDir(repo)}" worktree prune\`, then run the command again.`,
-        details: { repo, path: user.path },
-      });
-    }
-  }
+  const defaults = await checkWorktreeRepos(
+    ctx,
+    signal,
+    codebase,
+    branch,
+    repos,
+  );
   const postCreate = ctx.config.postCreate;
   if (postCreate.length) ctx.hooks.findSh();
-  const choices = new Map<string, BranchChoice>();
-  for (const repo of repos) {
-    const start = defaults.get(repo) as string;
-    const choice = await chooseBranch(git, repoDir(repo), branch, start, {
-      signal,
-    });
-    if (
-      choice.source === "new" &&
-      !(await git.remoteBranchExists(repoDir(repo), start, { signal }))
-    ) {
-      throw new XrError({
-        code: "no-default-branch",
-        message: `\`${repo}\` has no \`origin/${start}\`, the default branch to start \`${branch}\` from.`,
-        hint: `Fix \`default-branch\` of \`${repo}\` in the config, or run \`git -C "${repoDir(repo)}" remote set-head origin --auto\`, then run the command again.`,
-        details: { repo },
-      });
-    }
-    choices.set(repo, choice);
-  }
+  const choices = await chooseBranches(
+    ctx,
+    signal,
+    codebase,
+    branch,
+    repos,
+    defaults,
+  );
 
   await makeProjectFolderStep(fs, tx, projectDir);
   for (const repo of repos) {
@@ -251,6 +236,82 @@ export async function createProject(
       return { repo, status: "ok", message, source };
     }),
   };
+}
+
+/**
+ * The checks of a new worktree of `branch` in each repo, in order: `git fetch
+ * origin`, the default branch, and `branch` not checked out in another place
+ * (`branch-in-use`). Changes nothing. Gives the default branch of each repo.
+ */
+export async function checkWorktreeRepos(
+  ctx: Pick<Ctx, "fs" | "git" | "out" | "config">,
+  signal: AbortSignal,
+  codebase: string,
+  branch: string,
+  repos: readonly string[],
+): Promise<Map<string, string>> {
+  const { fs, git } = ctx;
+  const repoDir = (repo: string) => join(codebase, repo);
+  for (const repo of repos) {
+    await check(ctx, `Fetch ${repo}`, () =>
+      git.fetch(repoDir(repo), { signal }),
+    );
+  }
+  const defaults = new Map<string, string>();
+  for (const repo of repos) {
+    defaults.set(repo, await defaultBranch(ctx, repo, repoDir(repo), signal));
+  }
+  for (const repo of repos) {
+    const user = (await git.worktreeList(repoDir(repo), { signal })).find(
+      (worktree) => worktree.branch === branch,
+    );
+    if (user) {
+      throw new XrError({
+        code: "branch-in-use",
+        message: `The branch \`${branch}\` of \`${repo}\` is checked out in ${user.path}.`,
+        // A folder deleted by hand still has its worktree entry until a prune.
+        hint: fs.exists(user.path)
+          ? "Switch that folder to another branch, or use another branch name, then run the command again."
+          : `Run \`git -C "${repoDir(repo)}" worktree prune\`, then run the command again.`,
+        details: { repo, path: user.path },
+      });
+    }
+  }
+  return defaults;
+}
+
+/**
+ * The branch choice of each repo (see `chooseBranch`). A new branch needs
+ * `origin/<default branch>`, else `no-default-branch`. Reads only.
+ */
+export async function chooseBranches(
+  ctx: Pick<Ctx, "git">,
+  signal: AbortSignal,
+  codebase: string,
+  branch: string,
+  repos: readonly string[],
+  defaults: ReadonlyMap<string, string>,
+): Promise<Map<string, BranchChoice>> {
+  const { git } = ctx;
+  const choices = new Map<string, BranchChoice>();
+  for (const repo of repos) {
+    const dir = join(codebase, repo);
+    const start = defaults.get(repo) as string;
+    const choice = await chooseBranch(git, dir, branch, start, { signal });
+    if (
+      choice.source === "new" &&
+      !(await git.remoteBranchExists(dir, start, { signal }))
+    ) {
+      throw new XrError({
+        code: "no-default-branch",
+        message: `\`${repo}\` has no \`origin/${start}\`, the default branch to start \`${branch}\` from.`,
+        hint: `Fix \`default-branch\` of \`${repo}\` in the config, or run \`git -C "${dir}" remote set-head origin --auto\`, then run the command again.`,
+        details: { repo },
+      });
+    }
+    choices.set(repo, choice);
+  }
+  return choices;
 }
 
 /** A check that shows one step line and changes nothing. */

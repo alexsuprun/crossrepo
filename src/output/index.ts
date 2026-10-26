@@ -99,6 +99,12 @@ export interface ProjectRepoItem {
   present: boolean;
 }
 
+/** One repo of a `project-repos` block: `present` when its worktree folder exists. */
+export interface ProjectRepoEntry extends ProjectRepoItem {
+  /** From the merged config; `null` in JSON when absent. */
+  description?: string;
+}
+
 /** What a part of the Report is, never how it looks. The set is closed (AD-3). */
 export type Block =
   /** A boolean or a number prints as `<key>: <value>` in text modes; JSON keeps its type. */
@@ -130,7 +136,12 @@ export type Block =
       codebase: Text;
       created?: string;
       repos: ProjectRepoItem[];
-    };
+    }
+  /**
+   * The repos of one project. Text: one line per repo, no header. JSON:
+   * `project` and `entries` as top-level keys.
+   */
+  | { type: "project-repos"; project: string; entries: ProjectRepoEntry[] };
 
 /** The error of a failed command. Same fields as `XrError`, which `output` may not import. */
 export interface ReportError {
@@ -340,8 +351,22 @@ function blocksData(
   return data;
 }
 
-/** The JSON keys of a block: one key, or several for the flat `project` block. */
+/** The JSON keys of a block: one key, or several for the flat `project` and `project-repos` blocks. */
 function blockEntries(block: Block): [string, unknown][] {
+  if (block.type === "project-repos") {
+    return [
+      ["project", block.project],
+      [
+        "entries",
+        block.entries.map(({ repo, path, present, description }) => ({
+          repo,
+          path: jsonText(path),
+          present,
+          description: description ?? null,
+        })),
+      ],
+    ];
+  }
   if (block.type !== "project") return [blockData(block)];
   return [
     ["project", block.project],
@@ -526,6 +551,8 @@ function renderBlock(block: Block, paint: Paint, show: Show): string {
       return renderProjects(block.items, show);
     case "project":
       return renderProject(block, paint, show);
+    case "project-repos":
+      return renderProjectRepos(block.entries, paint);
     default:
       return noRenderer(block);
   }
@@ -589,6 +616,21 @@ function renderProject(
         : `  ${paint("muted", SYMBOL.skipped)} ${repo.padEnd(repoWidth)}   ${paint("warn", "worktree folder missing")}`,
     ),
   ].join("\n");
+}
+
+/** One line per repo: `✓` or `–`, the padded name, then the description or "worktree folder missing". */
+function renderProjectRepos(
+  entries: readonly ProjectRepoEntry[],
+  paint: Paint,
+): string {
+  const width = Math.max(0, ...entries.map(({ repo }) => repo.length));
+  return entries
+    .map(({ repo, present, description }) =>
+      present
+        ? `${paint("ok", SYMBOL.ok)} ${`${repo.padEnd(width)}   ${description ?? ""}`.trimEnd()}`
+        : `${paint("muted", SYMBOL.skipped)} ${repo.padEnd(width)}   ${paint("warn", "worktree folder missing")}`,
+    )
+    .join("\n");
 }
 
 function renderFields(
