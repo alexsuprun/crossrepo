@@ -124,6 +124,8 @@ Each line gets the environment of `xr`, then the values of `project.vars`, then 
 
 A `project.vars` value can be text, a number or a boolean. A number or a boolean is passed as text: `5432` becomes `"5432"` and `true` becomes `"true"`. A list or a map is `invalid-config`.
 
+A `project.vars` name may not start with `CROSSREPO_`, in any case, since these names belong to `xr`. With such a name, the command fails with `reserved-var-name` before it opens a picker or changes anything. [`xr codebase doctor`](../codebase-doctor/) lists each such name with its file.
+
 ## Undo
 
 When a step fails, or you press Ctrl-C, `xr` undoes the steps that are done, in reverse order, so the project folder goes last:
@@ -173,6 +175,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 | `missing-argument` | No repo names and no `--all`, and no picker can open, or no repo is on disk. `error.details` is `{ "argument": "repos", "choices": [<name>] }`. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase. A project folder is not accepted either. |
 | `invalid-config` | The config is not valid, for example a `project.vars` value is a list or a map. |
+| `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The message names each such name and the config file that sets it. The hint is `xr codebase doctor`. It comes first, before the picker: no lock, no change. |
 | `repo-not-found` | A repo name is not in the config. The hint names `xr codebase repo list`. |
 | `repos-not-ready` | A chosen repo is not on disk, also with `--all`. `error.details.repos` has one row per repo. The hint names `xr codebase clone`. |
 | `project-exists` | The project folder exists. `error.details.path` is the path. |

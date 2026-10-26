@@ -34,6 +34,8 @@ export const ERROR_CODES = [
   "branch-not-merged",
   "repo-already-in-project",
   "last-repo",
+  "checks-failed",
+  "reserved-var-name",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

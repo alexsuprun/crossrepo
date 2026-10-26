@@ -41,6 +41,17 @@ export interface ConfigView {
   preRemove: string[];
   /** The merged `project.vars`; numbers and booleans are text already. */
   vars: Record<string, string>;
+  /** The keys of any level that the schema does not know, with the files that set them. */
+  unknownKeys: UnknownConfigKey[];
+}
+
+/** A config key the schema does not know (D56). */
+export interface UnknownConfigKey {
+  /** Dotted, e.g. `repos.web.remot`. */
+  key: string;
+  files: string[];
+  /** The closest known key, dotted; may be empty. */
+  suggestion: string;
 }
 
 /** One merged entry of `repos`. */
@@ -298,6 +309,8 @@ export interface RepoResult {
 /** One `xr` command. `cli` checks the folder kind before `run`. */
 export interface CommandUnit {
   accepts: readonly DiscoveryKind[];
+  /** The command reports unknown config keys itself, so `cli` does not emit them as live warnings. */
+  reportsUnknownKeys?: boolean;
   /** The error for a folder kind not in `accepts`. Without it, `cli` gives `not-a-codebase`. */
   refuse?(discovery: Discovery, fs: CtxFs): XrError;
   /** `args` are the positional arguments of the command, as given; `options` its own flags, camelCase. */

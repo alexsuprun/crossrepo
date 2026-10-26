@@ -39,6 +39,18 @@ export interface FieldItem {
   extra?: Record<string, Text>;
 }
 
+export type CheckStatus = "ok" | "warn" | "error";
+
+/** One result of a doctor check. A check with no problem gives one `ok` item with no message. */
+export interface CheckItem {
+  /** Stable kebab-case id of the check. */
+  id: string;
+  status: CheckStatus;
+  message?: Text;
+  /** May hold several lines. */
+  fix?: Text;
+}
+
 /** One project of a `projects` block. */
 export interface ProjectItem {
   project: string;
@@ -69,7 +81,7 @@ export type Block =
   /** Rows of records. Each record has the same keys, which are the JSON field names. */
   | { type: "table"; key: string; items: Record<string, Cell>[] }
   | { type: "repos"; items: RepoItem[] }
-  | { type: "checks"; items: { id: string; status: string; fix?: Text }[] }
+  | { type: "checks"; items: CheckItem[] }
   | {
       type: "leftovers";
       items: { what: string; path: Text; command: Text }[];

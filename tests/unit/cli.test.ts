@@ -564,7 +564,21 @@ describe("configView", () => {
       postCreate: [],
       preRemove: [],
       vars: {},
+      unknownKeys: [],
     });
+  });
+
+  test("keeps the unknown keys of the load", () => {
+    const unknownKeys = [
+      {
+        key: "repo",
+        files: ["/c/.crossrepo/config.yaml"],
+        suggestion: "repos",
+      },
+    ];
+    expect(
+      configView({ ...base, unknownKeys, values: {} }).unknownKeys,
+    ).toEqual(unknownKeys);
   });
 
   test("gives the codebase name, the post-create lines and the vars", () => {

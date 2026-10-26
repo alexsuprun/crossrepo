@@ -19,6 +19,7 @@ export default defineConfig({
 					items: [
 						{ label: 'xr codebase init', slug: 'commands/codebase-init' },
 						{ label: 'xr codebase clone', slug: 'commands/codebase-clone' },
+						{ label: 'xr codebase doctor', slug: 'commands/codebase-doctor' },
 						{ label: 'xr codebase pull', slug: 'commands/codebase-pull' },
 						{ label: 'xr codebase repo add', slug: 'commands/codebase-repo-add' },
 						{ label: 'xr codebase repo list', slug: 'commands/codebase-repo-list' },

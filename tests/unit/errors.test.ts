@@ -56,6 +56,8 @@ describe("ERROR_CODES", () => {
       "project-drift",
       "repo-already-in-project",
       "last-repo",
+      "checks-failed",
+      "reserved-var-name",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);

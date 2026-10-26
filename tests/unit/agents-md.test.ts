@@ -5,6 +5,7 @@ import {
   projectReposSection,
   renderCodebaseSection,
   renderProjectCodebaseSection,
+  repoHeadings,
   spliceProjectSections,
   spliceSection,
 } from "../../src/domain/agents-md.ts";
@@ -381,5 +382,49 @@ describe("spliceProjectSections", () => {
     const text = spliceProjectSections(base, cb, "## Repos\r\n");
     expect(text).toBe(`# A\r\n\r\n${cb}\r\n## Repos\r\n\r\n## Notes\r\n`);
     expect(text.replaceAll("\r\n", "")).not.toContain("\n");
+  });
+});
+
+describe("repoHeadings", () => {
+  test("gives the trimmed ### titles under the first ## Repos, in file order", () => {
+    const text = [
+      "# Team",
+      "",
+      "### outside",
+      "",
+      "## Repos",
+      "",
+      "Intro.",
+      "",
+      "### API ",
+      "",
+      "#### deeper",
+      "",
+      "### old",
+      "",
+      "## Footer",
+      "",
+      "### after",
+      "",
+      "## Repos",
+      "",
+      "### second",
+      "",
+    ].join("\n");
+    expect(repoHeadings(text)).toEqual(["API", "old"]);
+  });
+
+  test("ignores a ### heading in a code block", () => {
+    const text = "## Repos\n\n```\n### fake\n```\n\n### web\n";
+    expect(repoHeadings(text)).toEqual(["web"]);
+  });
+
+  test("a ## Repos section with no ### gives an empty list", () => {
+    expect(repoHeadings("## Repos\n\nNone yet.\n")).toEqual([]);
+  });
+
+  test("no ## Repos section gives undefined", () => {
+    expect(repoHeadings("# Team\n\n### api\n")).toBeUndefined();
+    expect(repoHeadings("")).toBeUndefined();
   });
 });
