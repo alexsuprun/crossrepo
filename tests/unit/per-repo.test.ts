@@ -86,6 +86,34 @@ describe("perRepo", () => {
     expect(most).toBe(1);
   });
 
+  test("repos as a function: it is called once the lock is held, and a throw from it releases the lock", async () => {
+    const { ctx, log } = recorder();
+    const results = await perRepo(
+      ctx,
+      () => {
+        log.push("list");
+        return [{ name: "api" }];
+      },
+      async ({ name }) => ({ repo: name, status: "ok" }),
+    );
+    expect(results).toEqual([{ repo: "api", status: "ok" }]);
+    expect(log).toEqual(["lock /c/.crossrepo/xr.lock", "list", "release"]);
+
+    const gone = recorder();
+    const boom = new XrError({ code: "project-not-found", message: "gone" });
+    const error = await failure(
+      perRepo(
+        gone.ctx,
+        () => {
+          throw boom;
+        },
+        async ({ name }: { name: string }) => ({ repo: name, status: "ok" }),
+      ),
+    );
+    expect(error).toBe(boom);
+    expect(gone.log.at(-1)).toBe("release");
+  });
+
   test("no repos: takes and releases the lock and returns an empty list", async () => {
     const { ctx, log, events } = recorder();
     expect(
@@ -158,6 +186,71 @@ describe("perRepo", () => {
     expect(log).toContain("run docs");
     expect(log.at(-1)).toBe("release");
     expect(interrupts.listening).toBe(0);
+  });
+
+  test("a conflict repo fails the run with repos-failed and does not stop the others", async () => {
+    const { ctx, events, log } = recorder();
+    const conflict: RepoResult = {
+      repo: "web",
+      status: "conflict",
+      message: "merge conflict in 1 file: `a.ts`",
+      hint: "fix it",
+      files: ["a.ts"],
+      stashKept: false,
+    };
+    const error = await failure(
+      perRepo(
+        ctx,
+        repos,
+        async ({ name }) => {
+          log.push(`run ${name}`);
+          return name === "web" ? conflict : { repo: name, status: "ok" };
+        },
+        { hint: "Fix each failed repo." },
+      ),
+    );
+    expect(error.code).toBe("repos-failed");
+    expect(exitCodeFor(error)).toBe(1);
+    expect(error.message).toBe("1 of 3 repos has conflicts: web.");
+    expect(error.hint).toBe("Fix each failed repo.");
+    const items = [
+      { repo: "api", status: "ok" },
+      conflict,
+      { repo: "docs", status: "ok" },
+    ];
+    expect(error.report).toEqual([{ type: "repos", items }]);
+    expect(events).toEqual(items.map((item) => ({ type: "repo", ...item })));
+    expect(log).toContain("run docs");
+    expect(log.at(-1)).toBe("release");
+  });
+
+  test("failed and conflict repos: the message counts both and names them in order", async () => {
+    const { ctx } = recorder();
+    const error = await failure(
+      perRepo(ctx, repos, async ({ name }) =>
+        name === "api"
+          ? { repo: name, status: "failed", message: "boom" }
+          : name === "web"
+            ? { repo: name, status: "conflict", stashKept: true }
+            : { repo: name, status: "ok" },
+      ),
+    );
+    expect(error.code).toBe("repos-failed");
+    expect(error.message).toBe(
+      "1 of 3 repos failed, 1 has conflicts: api, web.",
+    );
+  });
+
+  test("two conflict repos: the message uses have", async () => {
+    const { ctx } = recorder();
+    const error = await failure(
+      perRepo(ctx, repos, async ({ name }) =>
+        name === "api"
+          ? { repo: name, status: "ok" }
+          : { repo: name, status: "conflict" },
+      ),
+    );
+    expect(error.message).toBe("2 of 3 repos have conflicts: web, docs.");
   });
 
   test("a throw from the callback is not caught: it ends the run and the lock is released", async () => {

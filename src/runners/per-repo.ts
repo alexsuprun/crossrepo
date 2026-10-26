@@ -18,6 +18,10 @@ export interface RepoResult {
   status: RepoStatus;
   message?: string;
   hint?: string;
+  /** The files with a merge conflict, for a `conflict`. */
+  files?: string[];
+  /** For a `conflict`: the uncommitted changes stay in `git stash list`. */
+  stashKept?: boolean;
   /** What a stopped repo left on disk; it goes to a `leftovers` error block, not the result. */
   leftover?: Leftover;
 }
@@ -30,6 +34,8 @@ export type PerRepoEvent =
       status: RepoStatus;
       message?: string;
       hint?: string;
+      files?: string[];
+      stashKept?: boolean;
     };
 
 export interface PerRepoCtx
@@ -50,17 +56,20 @@ const INTERRUPTED = "interrupted";
  * A throw from `run` is not caught. After the first Ctrl-C the repo in flight
  * keeps the result `run` returns (it gives `skipped`/`interrupted` when it was
  * stopped), every repo not reached is `skipped`/`interrupted`, and the run ends
- * with `interrupted`; else any `failed` repo ends it with
+ * with `interrupted`; else any `failed` or `conflict` repo ends it with
  * `repos-failed`. Both errors carry the `repos` block as a top-level Report
- * block. A second Ctrl-C fails at once and leaves the lock.
+ * block. A second Ctrl-C fails at once and leaves the lock. `repos` may be a
+ * function: it is called once the lock is held, so it can read state that the
+ * lock guards; a throw from it ends the run.
  */
 export async function perRepo<T extends { name: string }>(
   ctx: PerRepoCtx,
-  repos: readonly T[],
+  repoList: readonly T[] | (() => readonly T[]),
   run: (repo: T, signal: AbortSignal) => Promise<RepoResult>,
   options: PerRepoOptions = {},
 ): Promise<RepoResult[]> {
   const results: RepoResult[] = [];
+  let repos: readonly T[] = typeof repoList === "function" ? [] : repoList;
   const leftovers: Leftover[] = [];
   const stopped = (repo: T): RepoResult => ({
     repo: repo.name,
@@ -95,6 +104,7 @@ export async function perRepo<T extends { name: string }>(
   const work = (async () => {
     try {
       lock = acquireLock(ctx);
+      if (typeof repoList === "function") repos = repoList();
       for (const repo of repos) {
         // Lets a waiting Ctrl-C run before the next repo starts.
         await setImmediate();
@@ -108,13 +118,14 @@ export async function perRepo<T extends { name: string }>(
       }
       if (ctrlC.count > 0) throw fail(interrupted(), results);
       const failed = results.filter((result) => result.status === "failed");
-      if (failed.length) {
+      const conflicts = results.filter(
+        (result) => result.status === "conflict",
+      );
+      if (failed.length || conflicts.length) {
         throw fail(
           new XrError({
             code: "repos-failed",
-            message: `${failed.length} of ${results.length} ${results.length === 1 ? "repo" : "repos"} failed: ${failed
-              .map((result) => result.repo)
-              .join(", ")}.`,
+            message: failedMessage(results, failed.length, conflicts.length),
             hint: options.hint,
           }),
           results,
@@ -126,4 +137,23 @@ export async function perRepo<T extends { name: string }>(
     }
   })();
   return ctrlC.until(work);
+}
+
+/** Such as `1 of 3 repos failed, 1 has conflicts: api, web.`, the repos in run order. */
+function failedMessage(
+  results: readonly RepoResult[],
+  failed: number,
+  conflicts: number,
+): string {
+  const total = `${results.length} ${results.length === 1 ? "repo" : "repos"}`;
+  const hasConflicts = (n: number) => `${n === 1 ? "has" : "have"} conflicts`;
+  const counts = !conflicts
+    ? `${failed} of ${total} failed`
+    : !failed
+      ? `${conflicts} of ${total} ${hasConflicts(conflicts)}`
+      : `${failed} of ${total} failed, ${conflicts} ${hasConflicts(conflicts)}`;
+  const names = results
+    .filter(({ status }) => status === "failed" || status === "conflict")
+    .map(({ repo }) => repo);
+  return `${counts}: ${names.join(", ")}.`;
 }

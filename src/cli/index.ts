@@ -19,6 +19,7 @@ import { projectRemove } from "../commands/project/remove.ts";
 import { projectRepoAdd } from "../commands/project/repo/add.ts";
 import { projectRepoList } from "../commands/project/repo/list.ts";
 import { projectRepoRemove } from "../commands/project/repo/remove.ts";
+import { projectSync } from "../commands/project/sync.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
@@ -471,6 +472,19 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(projectInfo, info.args));
+  const sync: Command = project
+    .command("sync")
+    .description(
+      "fetch origin and merge the default branch into each worktree of one project",
+    )
+    // Optional for commander, so a missing project opens our picker or gives `missing-argument`.
+    .argument(
+      "[project]",
+      "the project folder name or branch; default: the current project",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectSync, sync.args));
   const removeProject: Command = project
     .command("remove")
     .description(

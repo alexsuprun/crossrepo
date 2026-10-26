@@ -72,7 +72,7 @@ export function pullPresent(
         return { repo: name, status: "skipped", message: "interrupted" };
       }
       if (!(error instanceof GitError)) throw error;
-      const hint = HINTS.find(([text]) => text.test(error.stderr))?.[1](dir);
+      const hint = pullHint(error.stderr, dir);
       return {
         repo: name,
         status: "failed",
@@ -83,8 +83,13 @@ export function pullPresent(
   };
 }
 
+/** The repo hint of `xr codebase pull` for git's stderr, or `undefined` when no text matches. */
+export function pullHint(stderr: string, dir: string): string | undefined {
+  return HINTS.find(([text]) => text.test(stderr))?.[1](dir);
+}
+
 /** The first `fatal:` or `error:` line, else the first line that is not a `hint:` line. */
-function gitMessage(stderr: string): string | undefined {
+export function gitMessage(stderr: string): string | undefined {
   const lines = stderr
     .split(/\r?\n/)
     .map((line) => line.trim())
