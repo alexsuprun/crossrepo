@@ -146,7 +146,7 @@ describe(".github/workflows/ci.yml", () => {
       "utf8",
     ),
   );
-  const steps: { run?: string; if?: string }[] =
+  const steps: { run?: string; if?: string; shell?: string }[] =
     workflow.jobs?.checks?.steps ?? [];
 
   test("jobs.checks runs the coverage floor on Linux and the tests without coverage elsewhere", () => {
@@ -158,6 +158,22 @@ describe(".github/workflows/ci.yml", () => {
       { run: "bun run test", if: "runner.os == 'Linux'" },
       { run: "bun run test:no-coverage", if: "runner.os != 'Linux'" },
     ]);
+  });
+
+  // Defender scans each git process the tests start, which slows Windows the most.
+  test("jobs.checks turns off Defender real-time scanning on Windows before the tests", () => {
+    const defender = steps.findIndex((step) =>
+      step.run?.includes("Set-MpPreference -DisableRealtimeMonitoring $true"),
+    );
+    const firstTest = steps.findIndex((step) =>
+      step.run?.startsWith("bun run test"),
+    );
+    expect(defender).toBeGreaterThanOrEqual(0);
+    expect(steps[defender]).toMatchObject({
+      if: "runner.os == 'Windows'",
+      shell: "pwsh",
+    });
+    expect(defender).toBeLessThan(firstTest);
   });
 });
 
