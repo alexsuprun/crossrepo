@@ -52,6 +52,12 @@ export interface ProjectRepoItem {
   present: boolean;
 }
 
+/** One repo of a `project-repos` block: `present` when its worktree folder exists. */
+export interface ProjectRepoEntry extends ProjectRepoItem {
+  /** From the merged config; `null` in JSON when absent. */
+  description?: string;
+}
+
 /** What a part of the Report is, never how it looks (AD-3). */
 export type Block =
   | { type: "value"; key: string; value: Text | boolean | number }
@@ -76,7 +82,8 @@ export type Block =
       codebase: Text;
       created?: string;
       repos: ProjectRepoItem[];
-    };
+    }
+  | { type: "project-repos"; project: string; entries: ProjectRepoEntry[] };
 
 export interface Report {
   blocks: Block[];

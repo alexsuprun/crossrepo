@@ -95,24 +95,26 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `file-busy` | `xr` could not write a file because another program is using it (Windows only). Close that program and run the command again. |
 | `git-too-old` | git is older than 2.27. Upgrade git. |
 | `git-failed` | A git command failed. The message names the command and the first line git printed. |
-| `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`, a folder given to `xr codebase repo add` is not a repo, or a repo chosen for `xr project create` is not on disk. `error.details.repos` lists each repo with the fix. |
+| `repos-not-ready` | A repo has no `origin` remote or no `origin/HEAD`, a folder given to `xr codebase repo add` is not a repo, or a repo chosen for `xr project create` or `xr project repo add` is not on disk. `error.details.repos` lists each repo with the fix. |
 | `already-a-codebase` | `xr codebase init` ran in a folder that is a codebase already, or that has a `.crossrepo/` folder. |
 | `inside-a-project` | `xr codebase init` ran in a project folder. |
 | `repo-exists` | `xr codebase repo add` got a name that the codebase config has already, or the folder to clone into exists. |
 | `not-in-codebase` | `xr codebase repo add` got a folder that is not directly in the codebase folder. Move the folder into the codebase first. |
-| `repo-not-found` | `xr codebase repo remove` got a name that is not in `repos:` of the codebase config, or `xr project create` got a repo name that is not in the config. |
+| `repo-not-found` | `xr codebase repo remove` got a name that is not in `repos:` of the codebase config, `xr project create` or `xr project repo add` got a repo name that is not in the config, or `xr project repo remove` got a repo that is not in the project. |
 | `repo-in-use` | `xr codebase repo remove` got a repo that a project of this codebase uses. `error.details.projects` lists the projects. |
-| `invalid-project-record` | A `.crossrepo/project.yaml` in the projects folder is not valid. The message names the file. In `xr project list` and `xr project info` it is a warning, and the other projects still show. In `xr project remove` it is a warning, and that project is skipped. |
+| `invalid-project-record` | A `.crossrepo/project.yaml` in the projects folder is not valid. The message names the file. In `xr project list` and `xr project info` it is a warning, and the other projects still show. In `xr project remove` it is a warning, and that project is skipped. In `xr project repo add`, `repo remove` and `repo list` it is a warning for the projects that the lookup skips, but an error for the record of the current project folder, and for the record of the chosen project when it is read again inside the lock. |
 | `would-lose-work` | `xr codebase repo remove` would delete a repo folder that has uncommitted changes, unpushed commits or stashes, or that has no `.git`. Nothing changes. |
 | `repos-failed` | A command that works on each repo, such as `xr codebase clone` or `xr codebase pull`, had at least one repo that failed. The other repos still ran. `repos` lists each repo as `{ "repo", "status", "message"?, "hint"? }`. |
 | `project-exists` | `xr project create` found a folder at the project path already. `error.details.path` is the path. |
-| `branch-in-use` | `xr project create` got a branch that is checked out in the codebase repo or in another worktree. `error.details` is `{ "repo", "path" }`. |
-| `no-default-branch` | `xr project create` found no default branch for a repo: no `default-branch` in the config and no `origin/HEAD`. |
+| `branch-in-use` | `xr project create` or `xr project repo add` got a branch that is checked out in the codebase repo or in another worktree. `error.details` is `{ "repo", "path" }`. |
+| `no-default-branch` | `xr project create` or `xr project repo add` found no default branch for a repo: no `default-branch` in the config and no `origin/HEAD`. |
 | `hook-failed` | A hook line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. |
 | `sh-not-found` | A hook must run, and Windows has no Git for Windows `sh.exe`. |
 | `project-not-found` | No project of this codebase has the given folder name or branch. `error.details.project` is the name. Run `xr project list` to see the projects. |
-| `uncommitted-changes` | `xr project remove` found changed, staged or untracked files that git does not ignore in a worktree of the project. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. Nothing changes. Use `--force` to remove anyway. |
-| `project-drift` | `xr project remove` found a folder in the project folder that is not a repo of the project. A folder whose name starts with `.`, such as `.idea`, does not count. `error.details` is `{ "path", "folders" }`. Nothing changes, also with `--force`. Move the folder out of the project folder. |
+| `uncommitted-changes` | `xr project remove` or `xr project repo remove` found changed, staged or untracked files that git does not ignore in a worktree of the project. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. Nothing changes. Use `--force` to remove anyway. |
+| `project-drift` | `xr project remove` found a folder in the project folder that is not a repo of the project. A folder whose name starts with `.`, such as `.idea`, does not count. `error.details` is `{ "path", "folders" }`. Nothing changes, also with `--force`. Move the folder out of the project folder. `xr project repo add` gives it when a folder or file is at the worktree path of a repo to add; move it out of the project folder. |
+| `repo-already-in-project` | `xr project repo add` got a repo that is in the project already. Nothing changes. |
+| `last-repo` | `xr project repo remove` would remove every repo of the project. Use `xr project remove` to remove the whole project. Nothing changes. |
 | `lock-held` | Another `xr` command that changes files is running in this codebase. The message has its process ID (pid). Wait for it to end, then run the command again. `xr` does not wait or retry. |
 | `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in a picker. The steps that were done are undone. When an undo fails, or after a second Ctrl-C, `error.details.leftovers` lists each thing left as `{ "what", "path", "command" }`. The exit code is 130. |
 

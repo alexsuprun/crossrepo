@@ -54,6 +54,8 @@ describe("ERROR_CODES", () => {
       "project-not-found",
       "uncommitted-changes",
       "project-drift",
+      "repo-already-in-project",
+      "last-repo",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);

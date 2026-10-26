@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createFs } from "../../src/adapters/fs/index.ts";
 import { createGit } from "../../src/adapters/git/index.ts";
 import { createLock } from "../../src/adapters/lock/index.ts";
-import type { Ctx, Tx } from "../../src/domain/ctx.ts";
+import type { Ctx, Leftover, Tx } from "../../src/domain/ctx.ts";
 import type { XrError } from "../../src/errors/index.ts";
 import { transaction } from "../../src/runners/transaction.ts";
 import {
@@ -222,5 +222,48 @@ describe("writeProjectRecordStep", () => {
     expect(error).toBeInstanceOf(Error);
     expect(existsSync(join(project, ".crossrepo"))).toBe(false);
     expect(existsSync(project)).toBe(true);
+  });
+
+  test("an existing record: undo writes the old text back", async () => {
+    const fs = createFs();
+    const project = join(iso.root, "proj");
+    const file = join(project, ".crossrepo", "project.yaml");
+    mkdirSync(join(project, ".crossrepo"), { recursive: true });
+    fs.writeText(file, "old: text\n");
+    const error = await inTx(async (tx) => {
+      await writeProjectRecordStep(fs, tx, project, record);
+      expect(readFileSync(file, "utf8")).toStartWith("branch: feat/x\n");
+      boom();
+    });
+    expect(error).toBeInstanceOf(Error);
+    expect(readFileSync(file, "utf8")).toBe("old: text\n");
+  });
+
+  test("an existing record: the leftover command is byHand, else a fallback, never rm -rf", async () => {
+    const fs = createFs();
+    const project = join(iso.root, "proj");
+    const file = join(project, ".crossrepo", "project.yaml");
+    mkdirSync(join(project, ".crossrepo"), { recursive: true });
+    fs.writeText(file, "old: text\n");
+    const seen: Leftover[] = [];
+    const tx: Tx = {
+      signal: new AbortController().signal,
+      step: async (_label, run, _undo, cleanup) => {
+        seen.push(cleanup);
+        return run(tx.signal);
+      },
+      finals: async () => {},
+    };
+    await writeProjectRecordStep(fs, tx, project, record, "Fix it by hand.");
+    await writeProjectRecordStep(fs, tx, project, record);
+    expect(seen).toEqual([
+      { what: "project record", path: file, command: "Fix it by hand." },
+      {
+        what: "project record",
+        path: file,
+        command: `Write the old text of ${file} back by hand.`,
+      },
+    ]);
+    for (const { command } of seen) expect(command).not.toContain("rm -rf");
   });
 });

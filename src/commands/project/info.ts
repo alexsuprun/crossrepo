@@ -1,12 +1,10 @@
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { type CommandUnit, type Ctx, codebaseDir } from "../../domain/ctx.ts";
-import { parseProjectRecord } from "../../domain/project-record.ts";
 import { XrError } from "../../errors/index.ts";
 import {
+  currentProject,
   findProject,
-  type ProjectEntry,
   projectEntries,
-  toEntry,
 } from "../../services/projects.ts";
 
 /**
@@ -23,7 +21,7 @@ export const projectInfo: CommandUnit = {
       name !== undefined
         ? findProject(ctx, codebase, name, { lenient: true })
         : discovery.kind === "project"
-          ? currentProject(ctx, discovery.dir)
+          ? currentProject(fs, discovery.dir)
           : missingProject(ctx, codebase);
     const folders = new Set(fs.listDirs(project.path));
     return {
@@ -45,20 +43,6 @@ export const projectInfo: CommandUnit = {
     };
   },
 };
-
-/** The project of the project folder `dir`, from its own record. */
-function currentProject(ctx: Ctx, dir: string): ProjectEntry {
-  const file = join(dir, ".crossrepo", "project.yaml");
-  const record = parseProjectRecord(ctx.fs.readText(file) ?? "");
-  if ("problem" in record) {
-    throw new XrError({
-      code: "invalid-project-record",
-      message: `The project record ${file} is not valid: ${record.problem}.`,
-      hint: `Fix ${file}, then run the command again.`,
-    });
-  }
-  return toEntry(basename(dir), dir, record);
-}
 
 /** `missing-argument` with the project names. `info` never opens a picker. */
 function missingProject(ctx: Ctx, codebase: string): never {

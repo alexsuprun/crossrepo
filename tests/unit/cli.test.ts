@@ -169,6 +169,41 @@ describe("main", () => {
     expect(result.stdout).toContain("remove [options] [project]");
   });
 
+  test("project help lists the repo group; project repo prints its help", async () => {
+    expect((await run(["project", "--help"])).stdout).toMatch(/^ {2}repo\b/m);
+    for (const argv of [
+      ["project", "repo"],
+      ["project", "repo", "--help"],
+    ]) {
+      const result = await run(argv);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Usage: xr project repo");
+      for (const name of ["add", "remove", "list"]) {
+        expect(result.stdout).toMatch(new RegExp(`^ {2}${name}\\b`, "m"));
+      }
+    }
+  });
+
+  test("project repo add, remove and list --help show --project", async () => {
+    const add = await run(["project", "repo", "add", "--help"]);
+    expect(add.stdout).toContain(
+      "Usage: xr project repo add [options] [repos...]",
+    );
+    const remove = await run(["project", "repo", "remove", "--help"]);
+    expect(remove.stdout).toContain(
+      "Usage: xr project repo remove [options] [repos...]",
+    );
+    expect(remove.stdout).toContain("--force");
+    expect(remove.stdout).toContain("--delete-branch");
+    const list = await run(["project", "repo", "list", "--help"]);
+    expect(list.stdout).toContain("Usage: xr project repo list [options]");
+    for (const result of [add, remove, list]) {
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("--project <project>");
+    }
+  });
+
   test("project help lists list and info", async () => {
     const result = await run(["project", "--help"]);
     expect(result.stdout).toContain("list");

@@ -1,0 +1,5 @@
+---
+"crossrepo": minor
+---
+
+Add `xr project repo add [<repo>...]`, `xr project repo remove [<repo>...] [--force] [--delete-branch]` and `xr project repo list`. Each takes `--project <project>` (folder name or branch), else uses the current project folder, else opens a project picker in a codebase folder (`missing-argument` when not interactive). `add` checks each repo first (known, on disk, not in the project, nothing at its worktree path, fetch, default branch, branch not in use), then adds the worktrees on the project branch and writes the record and the `## Codebase` and `## Repos` sections of `AGENTS.md`; any failure or Ctrl-C undoes every step. `remove` checks that each repo is in the project, that one repo stays, and that no worktree has uncommitted changes (`--force` skips only this), then removes the worktrees, with `--delete-branch` each merged branch, and only then writes the record and `AGENTS.md`. Neither runs a hook. `list` prints each repo with `✓` or `–` and its description, with no git call and no lock; JSON has `project` and `entries`. New error codes `repo-already-in-project` and `last-repo` (exit 1).
