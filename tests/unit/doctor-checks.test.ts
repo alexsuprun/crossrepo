@@ -286,8 +286,10 @@ describe("codebaseChecks", () => {
         fix: { code: `git -C "${api}" worktree prune` },
       },
     ]);
-    // Read-only: the entry is still there.
-    expect(git(api, "worktree", "list", "--porcelain")).toContain(gone);
+    // Read-only: the entry is still there. git prints `/` in paths on Windows too.
+    expect(git(api, "worktree", "list", "--porcelain")).toContain(
+      gone.replaceAll("\\", "/"),
+    );
   });
 
   test("stale-worktree skips a repo folder with no .git", async () => {
