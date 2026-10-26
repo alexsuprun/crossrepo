@@ -1,19 +1,18 @@
 import { basename, join } from "node:path";
-import type { Ctx, HookResult, Tx } from "../domain/ctx.ts";
+import type { Ctx, Tx } from "../domain/ctx.ts";
 import { LIST_HINT } from "../domain/hints.ts";
 import {
   badBranchChars,
   branchSlug,
   hookEnv,
-  hookStepLabel,
   hookVars,
   isoSeconds,
-  lastLines,
 } from "../domain/project.ts";
-import type { Block, RepoItem } from "../domain/report.ts";
+import type { RepoItem } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
 import { projectAgentsText, writeAgentsStep } from "./agents-md.ts";
 import { reposNotReady } from "./codebase-init.ts";
+import { runHookSteps } from "./hooks.ts";
 import { makeProjectFolderStep, writeProjectRecordStep } from "./projects.ts";
 import { repoState } from "./repos.ts";
 import {
@@ -37,7 +36,6 @@ export interface CreatedProject {
 
 const USAGE_HINT = "Run `xr project create --help` for usage.";
 const CLONE_HINT = "xr codebase clone";
-const HOOK_OUTPUT_LINES = 20;
 
 /**
  * The argument checks of `xr project create`, then the repo picker when no repo
@@ -235,27 +233,15 @@ export async function createProject(
     }),
     ctx.platform,
   );
-  for (const command of postCreate) {
-    await tx.step(
-      hookStepLabel("post-create", command),
-      async (stepSignal) => {
-        const result = await ctx.hooks.run({
-          command,
-          cwd: projectDir,
-          env,
-          signal: stepSignal,
-        });
-        if (!result.ok) throw hookFailed(command, result);
-      },
-      // Undo never runs a hook (D14), and the line made nothing that xr owns.
-      () => {},
-      {
-        what: "post-create hook",
-        path: projectDir,
-        command: `Undo by hand what \`${command}\` made outside the project folder, if anything.`,
-      },
-    );
-  }
+  await runHookSteps(ctx, tx, "post-create", postCreate, {
+    cwd: projectDir,
+    env,
+    cleanup: (command) => ({
+      what: "post-create hook",
+      path: projectDir,
+      command: `Undo by hand what \`${command}\` made outside the project folder, if anything.`,
+    }),
+  });
 
   return {
     projectDir,
@@ -300,33 +286,6 @@ async function defaultBranch(
     message: `\`${repo}\` has no default branch: the config has no \`default-branch\` for it, and \`origin/HEAD\` is not set.`,
     hint: `Run \`git -C "${dir}" remote set-head origin --auto\`, or set \`default-branch\` of \`${repo}\` in the config, then run the command again.`,
     details: { repo },
-  });
-}
-
-function hookFailed(
-  command: string,
-  result: Exclude<HookResult, { ok: true }>,
-): XrError {
-  const why = result.timedOut
-    ? "timed out after 10 minutes"
-    : result.exitCode === null
-      ? "was stopped by a signal"
-      : `failed with exit code ${result.exitCode}`;
-  const output = lastLines(result.output, HOOK_OUTPUT_LINES);
-  const blocks: Block[] = [
-    {
-      type: "section",
-      key: "hookOutput",
-      title: "Hook output",
-      blocks: [{ type: "value", key: "lines", value: output }],
-    },
-  ];
-  return new XrError({
-    code: "hook-failed",
-    message: `The post-create hook \`${command}\` ${why}.`,
-    hint: "Fix the line in `project.post-create` of the config, then run the command again.",
-    details: { command, exitCode: result.exitCode, timedOut: result.timedOut },
-    blocks,
   });
 }
 

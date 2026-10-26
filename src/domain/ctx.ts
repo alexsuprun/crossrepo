@@ -37,6 +37,8 @@ export interface ConfigView {
   name?: string;
   /** The merged `project.post-create` lines, in order. */
   postCreate: string[];
+  /** The merged `project.pre-remove` lines, in order. */
+  preRemove: string[];
   /** The merged `project.vars`; numbers and booleans are text already. */
   vars: Record<string, string>;
 }
@@ -95,6 +97,8 @@ export interface CtxGit {
     unpushed: { branch: string; count: number }[];
     stashes: number;
   }>;
+  /** Changed, staged and untracked files that are not ignored, in the one worktree at `dir` (D36). Reads only. */
+  uncommittedFiles(dir: string, options?: GitCallOptions): Promise<string[]>;
   /** `git -C <dir> fetch origin`. git's output goes to stderr. */
   fetch(dir: string, options?: GitCallOptions): Promise<void>;
   /** Each worktree of the repo, the main one first, with its branch when one is checked out. */
@@ -156,6 +160,8 @@ export interface PickRequest {
   message: string;
   /** The values to pick from, in the order shown. */
   choices: readonly string[];
+  /** A muted text shown next to a choice, by choice value. */
+  hints?: Readonly<Record<string, string>>;
   /** The start of the error message when there is no picker. */
   missing: string;
   /** The word before the list of choices in that message, e.g. `Choices`. */
@@ -223,6 +229,8 @@ export interface Ctx {
   platform: string;
   /** The clock, fixed in tests. */
   now(): Date;
+  /** Changes the current folder of the `xr` process; a recording fake in tests. */
+  chdir(dir: string): void;
 }
 
 /** What a failed undo leaves behind, and the command that removes it by hand. */

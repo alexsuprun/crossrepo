@@ -120,7 +120,7 @@ Each line gets the environment of `xr`, then the values of `project.vars`, then 
 | `CROSSREPO_PROJECT_NAME` | The project folder name, the slug. |
 | `CROSSREPO_PROJECT_BRANCH` | The branch. |
 | `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line, in record order. |
-| `CROSSREPO_HOOK` | `post-create`. |
+| `CROSSREPO_HOOK` | The hook that runs: `post-create` here, and `pre-remove` in [`xr project remove`](../project-remove/). |
 
 A `project.vars` value can be text, a number or a boolean. A number or a boolean is passed as text: `5432` becomes `"5432"` and `true` becomes `"true"`. A list or a map is `invalid-config`.
 

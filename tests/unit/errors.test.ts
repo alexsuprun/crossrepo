@@ -52,10 +52,16 @@ describe("ERROR_CODES", () => {
       "hook-failed",
       "sh-not-found",
       "project-not-found",
+      "uncommitted-changes",
+      "project-drift",
     ] as const) {
       expect(ERROR_CODES).toContain(code);
       expect(exitCodeFor(new XrError({ code, message: "x" }))).toBe(1);
     }
+  });
+
+  test("holds the warning code branch-not-merged", () => {
+    expect(ERROR_CODES).toContain("branch-not-merged");
   });
 
   test("holds the lock and Ctrl-C codes", () => {

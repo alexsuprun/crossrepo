@@ -47,10 +47,14 @@ export interface Warning {
 }
 
 /**
- * A value in a block. In text modes a path shows relative to the codebase or `~`,
- * and a code shows as a command. In JSON a path is absolute and a code is a plain string.
+ * A value in a block. In text modes a path shows relative to the codebase or `~`
+ * (with `homeOnly`, relative to `~` only), and a code shows as a command. In
+ * JSON a path is absolute and a code is a plain string.
  */
-export type Text = string | { path: string } | { code: string };
+export type Text =
+  | string
+  | { path: string; homeOnly?: boolean }
+  | { code: string };
 
 /** A `table` cell. In text modes `true` shows as `✓` and `false` as `–`; JSON keeps the boolean. */
 export type Cell = Text | boolean;
@@ -73,6 +77,8 @@ export interface RepoItem {
   hint?: Text;
   /** Where the branch of a new worktree came from: `local`, `tracking` or `new`. JSON only. */
   source?: string;
+  /** `xr project remove --delete-branch` deleted the branch. JSON only. */
+  branchDeleted?: boolean;
 }
 
 /** One project of a `projects` block. */
@@ -108,7 +114,8 @@ export type Block =
       items: { what: string; path: Text; command: Text }[];
     }
   | { type: "section"; key: string; title: Text; blocks: Block[] }
-  | { type: "note"; tone: Tone; text: Text }
+  /** A list of parts prints them joined, on one line. */
+  | { type: "note"; tone: Tone; text: Text | Text[] }
   /** Projects with their repos as child lines in text; `entries` in JSON. */
   | { type: "projects"; items: ProjectItem[] }
   /**
@@ -216,7 +223,13 @@ export function createOutput({
   const paint = painter(modes.stderr);
   const line = (text: string) => stderr(`${text}\n`);
   const show: Show = (text, { homeOnly = false } = {}) =>
-    showText(text, home, homeOnly ? undefined : codebase);
+    showText(
+      text,
+      home,
+      homeOnly || (typeof text === "object" && "path" in text && text.homeOnly)
+        ? undefined
+        : codebase,
+    );
 
   return {
     emit(event) {
@@ -304,7 +317,7 @@ function blocksData(
 ): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   const notes = blocks.flatMap((block) =>
-    block.type === "note" ? [jsonText(block.text)] : [],
+    block.type === "note" ? [parts(block.text).map(jsonText).join("")] : [],
   );
   for (const block of blocks) {
     if (block.type === "note") continue;
@@ -366,13 +379,16 @@ function blockData(block: Block): [string, unknown] {
     case "repos":
       return [
         "repos",
-        block.items.map(({ repo, status, message, hint, source }) => ({
-          repo,
-          status,
-          ...(message === undefined ? {} : { message: jsonText(message) }),
-          ...(hint === undefined ? {} : { hint: jsonText(hint) }),
-          ...(source === undefined ? {} : { source }),
-        })),
+        block.items.map(
+          ({ repo, status, message, hint, source, branchDeleted }) => ({
+            repo,
+            status,
+            ...(message === undefined ? {} : { message: jsonText(message) }),
+            ...(hint === undefined ? {} : { hint: jsonText(hint) }),
+            ...(source === undefined ? {} : { source }),
+            ...(branchDeleted === undefined ? {} : { branchDeleted }),
+          }),
+        ),
       ];
     case "leftovers":
       return [
@@ -419,6 +435,10 @@ function jsonCell(cell: Text | boolean | number): string | boolean | number {
   return typeof cell === "boolean" || typeof cell === "number"
     ? cell
     : jsonText(cell);
+}
+
+function parts(text: Text | Text[]): Text[] {
+  return Array.isArray(text) ? text : [text];
 }
 
 function jsonText(text: Text): string {
@@ -477,7 +497,12 @@ function renderBlock(block: Block, paint: Paint, show: Show): string {
     case "table":
       return renderTable(block.items, paint, show);
     case "note":
-      return paint(block.tone, show(block.text));
+      return paint(
+        block.tone,
+        parts(block.text)
+          .map((part) => show(part))
+          .join(""),
+      );
     case "repos":
       return block.items
         .map((item) => renderRepo(item, paint, show))

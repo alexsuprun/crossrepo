@@ -1164,3 +1164,75 @@ describe("project block", () => {
     ).toThrow("branch");
   });
 });
+
+describe("repos block branchDeleted", () => {
+  test("JSON keeps branchDeleted when set, also false; text does not show it", () => {
+    const block: Block = {
+      type: "repos",
+      items: [
+        {
+          repo: "api",
+          status: "ok",
+          message: "worktree removed, branch deleted",
+          branchDeleted: true,
+        },
+        {
+          repo: "web",
+          status: "ok",
+          message: "worktree removed, branch kept",
+          branchDeleted: false,
+        },
+        { repo: "docs", status: "ok" },
+      ],
+    };
+    const json = capture("json");
+    json.out.report({ blocks: [block] });
+    expect(JSON.parse(json.written.stdout).repos).toEqual([
+      {
+        repo: "api",
+        status: "ok",
+        message: "worktree removed, branch deleted",
+        branchDeleted: true,
+      },
+      {
+        repo: "web",
+        status: "ok",
+        message: "worktree removed, branch kept",
+        branchDeleted: false,
+      },
+      { repo: "docs", status: "ok" },
+    ]);
+    const text = capture("plain");
+    text.out.report({ blocks: [block] });
+    expect(text.written.stdout).toBe(
+      [
+        "✓ api: worktree removed, branch deleted",
+        "✓ web: worktree removed, branch kept",
+        "✓ docs",
+        "",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("a note made of parts", () => {
+  const note: Block = {
+    type: "note",
+    tone: "warn",
+    text: ["Run `cd ", { path: CODEBASE, homeOnly: true }, "`."],
+  };
+
+  test("text joins the parts; a homeOnly path is relative to ~, never to the codebase", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [note] });
+    expect(written.stdout).toBe(`Run \`cd ${join("~", "code", "shop")}\`.\n`);
+  });
+
+  test("JSON joins the parts with the absolute path", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [note] });
+    expect(JSON.parse(written.stdout).notes).toEqual([
+      `Run \`cd ${CODEBASE}\`.`,
+    ]);
+  });
+});

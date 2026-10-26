@@ -15,6 +15,7 @@ import { configShow } from "../commands/config/show.ts";
 import { projectCreate } from "../commands/project/create.ts";
 import { projectInfo } from "../commands/project/info.ts";
 import { projectList } from "../commands/project/list.ts";
+import { projectRemove } from "../commands/project/remove.ts";
 import {
   CODEBASE_PATH_HINT,
   ConfigError,
@@ -54,6 +55,8 @@ export interface MainOptions {
   platform?: NodeJS.Platform;
   /** Default the system clock; tests fix it. */
   now?: () => Date;
+  /** Changes the process's current folder. Default `process.chdir`; tests pass a fake. */
+  chdir?: (dir: string) => void;
 }
 
 /** A Ctrl-C source, as `ctx.interrupts`. */
@@ -216,6 +219,7 @@ async function runCommand(
     interrupts = NO_INTERRUPTS,
     platform = process.platform,
     now = () => new Date(),
+    chdir = (dir) => process.chdir(dir),
   }: MainOptions,
   out: Output,
 ): Promise<Report> {
@@ -260,6 +264,7 @@ async function runCommand(
     env,
     platform,
     now,
+    chdir,
   };
   return command.run(ctx, args, options);
 }
@@ -283,6 +288,7 @@ export function configView({
     })),
     ...(values.name === undefined ? {} : { name: values.name }),
     postCreate: values.project?.["post-create"] ?? [],
+    preRemove: values.project?.["pre-remove"] ?? [],
     vars: values.project?.vars ?? {},
   };
 }
@@ -462,6 +468,26 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(projectInfo, info.args));
+  const removeProject: Command = project
+    .command("remove")
+    .description(
+      "remove the worktrees and the folder of one project; keep the branches",
+    )
+    // Optional for commander, so a missing project opens our picker or gives `missing-argument`.
+    .argument("[project]", "the project folder name or branch")
+    .option(
+      "--force",
+      "remove worktrees even when they have uncommitted changes",
+    )
+    .option(
+      "--delete-branch",
+      "also delete each merged branch with `git branch -d`",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() =>
+      select(projectRemove, removeProject.args, removeProject.opts()),
+    );
   return program;
 }
 

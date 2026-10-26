@@ -27,6 +27,7 @@ export default defineConfig({
 						{ label: 'xr project create', slug: 'commands/project-create' },
 						{ label: 'xr project info', slug: 'commands/project-info' },
 						{ label: 'xr project list', slug: 'commands/project-list' },
+						{ label: 'xr project remove', slug: 'commands/project-remove' },
 					],
 				},
 			],

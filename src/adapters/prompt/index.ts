@@ -10,6 +10,8 @@ export interface PickRequest {
   message: string;
   /** The values to pick from, in the order shown. */
   choices: readonly string[];
+  /** A muted text shown next to a choice, by choice value. */
+  hints?: Readonly<Record<string, string>>;
   /** The start of the error message when there is no picker. */
   missing: string;
   /** The word before the list of choices in that message, e.g. `Choices`. */
@@ -58,7 +60,10 @@ export function createPrompt({
       // clack reads Ctrl-C as a key in raw mode, so no SIGINT handler is needed here.
       const picked = await select({
         message: request.message,
-        options: request.choices.map((value) => ({ value })),
+        options: request.choices.map((value) => ({
+          value,
+          hint: request.hints?.[value],
+        })),
         input: input ?? process.stdin,
         output: output ?? process.stderr,
       });

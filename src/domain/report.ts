@@ -2,8 +2,14 @@
 
 export type Tone = "ok" | "warn" | "error" | "muted";
 
-/** A path shows relative to the codebase or `~` in text modes; a code shows as a command. */
-export type Text = string | { path: string } | { code: string };
+/**
+ * A path shows relative to the codebase or `~` in text modes, and with
+ * `homeOnly` relative to `~` only; a code shows as a command.
+ */
+export type Text =
+  | string
+  | { path: string; homeOnly?: boolean }
+  | { code: string };
 
 /** A `table` cell. In text modes `true` shows as `✓` and `false` as `–`; JSON keeps the boolean. */
 export type Cell = Text | boolean;
@@ -18,6 +24,8 @@ export interface RepoItem {
   hint?: Text;
   /** Where the branch of a new worktree came from: `local`, `tracking` or `new`. JSON only. */
   source?: string;
+  /** `xr project remove --delete-branch` deleted the branch. JSON only. */
+  branchDeleted?: boolean;
 }
 
 export interface FieldItem {
@@ -57,7 +65,8 @@ export type Block =
       items: { what: string; path: Text; command: Text }[];
     }
   | { type: "section"; key: string; title: Text; blocks: Block[] }
-  | { type: "note"; tone: Tone; text: Text }
+  /** A list of parts prints them joined, on one line. */
+  | { type: "note"; tone: Tone; text: Text | Text[] }
   | { type: "projects"; items: ProjectItem[] }
   | {
       type: "project";
