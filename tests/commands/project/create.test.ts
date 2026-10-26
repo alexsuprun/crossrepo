@@ -693,12 +693,12 @@ describe("xr project create: post-create", () => {
     expect(result.data.ok).toBe(true);
   });
 
-  test("the 7 built-in vars and project.vars; the built-ins win", async () => {
+  test("the 7 built-in vars and project.vars", async () => {
     postCreate(
       [
         'for v in "$CROSSREPO_CODEBASE_PATH" "$CROSSREPO_CODEBASE_NAME" "$CROSSREPO_PROJECT_PATH" "$CROSSREPO_PROJECT_NAME" "$CROSSREPO_PROJECT_BRANCH" "$CROSSREPO_HOOK" "$PORT" "$DEBUG"; do printf "%s\\n" "$v"; done > vars.txt; printf "%s" "$CROSSREPO_PROJECT_REPOS" > repos.txt',
       ],
-      "  vars:\n    PORT: 5432\n    DEBUG: true\n    CROSSREPO_HOOK: mine",
+      "  vars:\n    PORT: 5432\n    DEBUG: true",
     );
     const result = await json([...CREATE, "feat/x", "--all"]);
     expect(result.code).toBe(0);
@@ -729,5 +729,33 @@ describe("xr project create: post-create", () => {
     expect(
       readFileSync(join(projects, "feat--x", "name.txt"), "utf8").trim(),
     ).toBe("Shop");
+  });
+});
+
+describe("xr project create with a reserved var name", () => {
+  test("fails with reserved-var-name before the picker: no lock, no change", async () => {
+    const requests = fakePickMany(spies, ["api"]);
+    writeConfig("project:\n  vars:\n    CROSSREPO_X: 1\n    crossrepo_y: 2\n");
+    const before = state();
+    const result = await json([...CREATE, "feat/x"], { tty: true });
+    expect(result.code).toBe(1);
+    expect(result.data.error).toEqual({
+      code: "reserved-var-name",
+      message: `Reserved var names in \`project.vars\`: \`CROSSREPO_X\` (${configFile}), \`crossrepo_y\` (${configFile}).`,
+      hint: "xr codebase doctor",
+    });
+    expect(requests).toHaveLength(0);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("names the file that sets the value in use", async () => {
+    writeFile(localConfig, "project:\n  vars:\n    CrossRepo_Z: 1\n");
+    const result = await json([...CREATE, "feat/x", "--all"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.message).toBe(
+      `Reserved var names in \`project.vars\`: \`CrossRepo_Z\` (${localConfig}).`,
+    );
+    expect(existsSync(join(projects, "feat--x"))).toBe(false);
   });
 });

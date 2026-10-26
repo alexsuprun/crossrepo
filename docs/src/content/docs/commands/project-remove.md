@@ -128,6 +128,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 | --- | --- |
 | `missing-argument` | No `<project>`, and no picker can open, or the codebase has no project. `error.details` is `{ "argument": "project", "choices": [<name>] }`. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase or a project folder. |
+| `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The message names each such name and the config file that sets it. The hint is `xr codebase doctor`. It comes first, before the picker: no lock, no change. |
 | `project-not-found` | No project of this codebase has that folder name or branch. `error.details.project` is the name. The hint is `xr project list`. It also comes when the project record is gone by the time the lock is taken, for example when another program deleted it while you picked. Nothing changes. |
 | `project-drift` | A folder in the project folder is not a repo of the project. `error.details` is `{ "path", "folders" }`. Also with `--force`. Nothing changes. |
 | `uncommitted-changes` | A worktree has changed, staged or untracked files. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. The hint names `--force`. Nothing changes. |

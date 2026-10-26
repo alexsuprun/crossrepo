@@ -867,3 +867,29 @@ describe("xr project remove with no project", () => {
     expect(chdirs).toEqual([]);
   });
 });
+
+describe("xr project remove with a reserved var name", () => {
+  test("fails with reserved-var-name before the picker: no lock, no change", async () => {
+    const requests = fakePick(spies, "feat--login");
+    writeConfig("project:\n  vars:\n    crossrepo_x: 1\n");
+    const before = state();
+    const result = await json(REMOVE, { tty: true });
+    expect(result.code).toBe(1);
+    expect(result.data.error).toEqual({
+      code: "reserved-var-name",
+      message: `Reserved var names in \`project.vars\`: \`crossrepo_x\` (${configFile}).`,
+      hint: "xr codebase doctor",
+    });
+    expect(requests).toHaveLength(0);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("in the project folder: still fails first", async () => {
+    writeConfig("project:\n  vars:\n    CROSSREPO_X: 1\n");
+    const before = state();
+    const result = await json(REMOVE, { cwd: login });
+    expect(result.data.error.code).toBe("reserved-var-name");
+    expect(state()).toEqual(before);
+  });
+});

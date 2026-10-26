@@ -6,6 +6,7 @@ import { createHooks } from "../adapters/hooks/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
 import { createMultiPrompt, createPrompt } from "../adapters/prompt/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
+import { codebaseDoctor } from "../commands/codebase/doctor.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
 import { codebasePull } from "../commands/codebase/pull.ts";
 import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
@@ -207,7 +208,10 @@ export async function main(options: MainOptions): Promise<number> {
   return exitCodeFor(failure.error);
 }
 
-/** Loads the config once, emits one warning per unknown key, builds `ctx` and runs the command. */
+/**
+ * Loads the config once, emits one warning per unknown key unless the command
+ * reports them itself, builds `ctx` and runs the command.
+ */
 async function runCommand(
   command: CommandUnit,
   args: readonly string[],
@@ -232,7 +236,7 @@ async function runCommand(
     home,
     codebase: discovery.kind === "none" ? undefined : discovery.codebase,
   });
-  for (const unknown of config.unknownKeys) {
+  for (const unknown of command.reportsUnknownKeys ? [] : config.unknownKeys) {
     out.emit({
       type: "warning",
       warning: {
@@ -279,6 +283,7 @@ export function configView({
   entries,
   projectsDir,
   values,
+  unknownKeys,
 }: LoadedConfig): Ctx["config"] {
   return {
     codebase,
@@ -294,6 +299,7 @@ export function configView({
     postCreate: values.project?.["post-create"] ?? [],
     preRemove: values.project?.["pre-remove"] ?? [],
     vars: values.project?.vars ?? {},
+    unknownKeys,
   };
 }
 
@@ -394,6 +400,14 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(codebasePull));
+  codebase
+    .command("doctor")
+    .description(
+      "check the codebase config, repo folders and AGENTS.md; print each problem with its fix",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(codebaseDoctor));
   const repo: Command = codebase
     .command("repo")
     .description("manage the repos of the codebase")

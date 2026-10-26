@@ -333,16 +333,6 @@ describe("report keys", () => {
     });
     expect(JSON.parse(written.stdout).error.details).toEqual({ ok: "1" });
   });
-
-  test("block types without a renderer yet throw", () => {
-    const blocks: Block[] = [{ type: "checks", items: [] }];
-    for (const block of blocks) {
-      for (const mode of ["json", "plain"] as const) {
-        const { out } = capture(mode);
-        expect(() => out.report({ blocks: [block] })).toThrow(block.type);
-      }
-    }
-  });
 });
 
 describe("report in text mode", () => {
@@ -748,6 +738,101 @@ const repos: Block = {
     },
   ],
 };
+
+const checks: Block = {
+  type: "checks",
+  items: [
+    { id: "unknown-config-key", status: "ok" },
+    {
+      id: "repo-folder-missing",
+      status: "error",
+      message: "web",
+      fix: { code: "git clone w.git web" },
+    },
+    {
+      id: "repo-not-in-config",
+      status: "warn",
+      message: "tools",
+      fix: "add to .crossrepo/config.yaml:\n  repos:\n    tools:",
+    },
+  ],
+};
+
+describe("checks block", () => {
+  test("JSON is a checks list; message and fix only when set", () => {
+    const { out, written } = capture("json");
+    out.report({ blocks: [checks] });
+    expect(written.stdout).toBe(
+      `${JSON.stringify({
+        ok: true,
+        warnings: [],
+        checks: [
+          { id: "unknown-config-key", status: "ok" },
+          {
+            id: "repo-folder-missing",
+            status: "error",
+            message: "web",
+            fix: "git clone w.git web",
+          },
+          {
+            id: "repo-not-in-config",
+            status: "warn",
+            message: "tools",
+            fix: "add to .crossrepo/config.yaml:\n  repos:\n    tools:",
+          },
+        ],
+      })}\n`,
+    );
+  });
+
+  test("text prints one line per item, the fix muted under it, each fix line indented", () => {
+    const { out, written } = capture("plain");
+    out.report({ blocks: [checks] });
+    expect(written.stdout).toBe(
+      [
+        "✓ unknown-config-key",
+        "✗ repo-folder-missing  web",
+        "    fix: git clone w.git web",
+        "! repo-not-in-config  tools",
+        "    fix: add to .crossrepo/config.yaml:",
+        "        repos:",
+        "          tools:",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("rich text paints the symbols by status and the fix lines muted", () => {
+    const { out, written } = capture("rich");
+    out.report({ blocks: [checks] });
+    const paint = (format: Parameters<typeof styleText>[0], text: string) =>
+      styleText(format, text, { validateStream: false });
+    expect(written.stdout).toContain(
+      `${paint("green", "✓")} unknown-config-key`,
+    );
+    expect(written.stdout).toContain(
+      `${paint("red", "✗")} repo-folder-missing`,
+    );
+    expect(written.stdout).toContain(
+      `${paint("yellow", "!")} repo-not-in-config`,
+    );
+    expect(written.stdout).toContain(
+      paint("dim", "    fix: git clone w.git web"),
+    );
+    expect(written.stdout).toContain(paint("dim", "        repos:"));
+  });
+
+  test("a checks block next to an error goes to stderr before the error line", () => {
+    const { out, written } = capture("plain");
+    out.report({
+      blocks: [checks],
+      error: { code: "checks-failed", message: "1 check failed" },
+    });
+    expect(written.stdout).toBe("");
+    expect(written.stderr).toStartWith("✓ unknown-config-key\n");
+    expect(written.stderr).toEndWith("error: 1 check failed\n");
+  });
+});
 
 describe("repos block", () => {
   test("JSON is a repos list; message and hint only when set", () => {

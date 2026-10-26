@@ -176,6 +176,20 @@ export function projectReposSection(
 }
 
 /**
+ * The trimmed titles of the top-level `###` headings in the first `## Repos`
+ * section, in file order, or `undefined` when there is no `## Repos`.
+ */
+export function repoHeadings(text: string): string[] | undefined {
+  const range = findSections(text).repos;
+  if (range === undefined) return undefined;
+  return headingsOf(text)
+    .filter(
+      (h) => h.depth === 3 && h.offset > range.start && h.offset < range.end,
+    )
+    .map((h) => h.title);
+}
+
+/**
  * Puts the project sections in place of `## Codebase` and `## Repos` of
  * `base`, keeping every other byte. A missing section goes at the end,
  * `## Codebase` first.

@@ -42,6 +42,7 @@ function ctx(): Pick<Ctx, "fs" | "config" | "out"> {
         resolved: projectsDir,
       },
       repos: [],
+      unknownKeys: [],
       postCreate: [],
       preRemove: [],
       vars: {},

@@ -85,6 +85,18 @@ export interface RepoItem {
   stashKept?: boolean;
 }
 
+export type CheckStatus = "ok" | "warn" | "error";
+
+/** One result of a doctor check. A check with no problem gives one `ok` item with no message. */
+export interface CheckItem {
+  /** Stable kebab-case id of the check. */
+  id: string;
+  status: CheckStatus;
+  message?: Text;
+  /** May hold several lines. */
+  fix?: Text;
+}
+
 /** One project of a `projects` block. */
 export interface ProjectItem {
   project: string;
@@ -118,7 +130,7 @@ export type Block =
   | { type: "table"; key: string; items: Record<string, Cell>[] }
   /** One result per repo. In text modes a line like the live `repo` event, the hint muted under it. */
   | { type: "repos"; items: RepoItem[] }
-  | { type: "checks"; items: { id: string; status: string; fix?: Text }[] }
+  | { type: "checks"; items: CheckItem[] }
   | {
       type: "leftovers";
       items: { what: string; path: Text; command: Text }[];
@@ -185,7 +197,7 @@ export interface Output {
   trace(text: string): void;
   /**
    * Writes the final Report: blocks to stdout on success, everything to stderr on
-   * failure in text modes. Throws on a key clash or a block type with no renderer yet.
+   * failure in text modes. Throws on a key clash.
    */
   report(report: Report): void;
 }
@@ -209,6 +221,12 @@ const REPO_LOOK: Record<RepoStatus, { symbol: string; tone: Tone }> = {
   skipped: { symbol: SYMBOL.skipped, tone: "muted" },
   failed: { symbol: SYMBOL.failed, tone: "error" },
   conflict: { symbol: SYMBOL.warning, tone: "warn" },
+};
+
+const CHECK_LOOK: Record<CheckStatus, { symbol: string; tone: Tone }> = {
+  ok: { symbol: SYMBOL.ok, tone: "ok" },
+  warn: { symbol: SYMBOL.warning, tone: "warn" },
+  error: { symbol: SYMBOL.failed, tone: "error" },
 };
 
 const TONE_FORMAT = {
@@ -358,7 +376,9 @@ function blocksData(
 }
 
 /** The JSON keys of a block: one key, or several for the flat `project` and `project-repos` blocks. */
-function blockEntries(block: Block): [string, unknown][] {
+function blockEntries(
+  block: Exclude<Block, { type: "note" }>,
+): [string, unknown][] {
   if (block.type === "project-repos") {
     return [
       ["project", block.project],
@@ -391,7 +411,10 @@ function blockEntries(block: Block): [string, unknown][] {
   ];
 }
 
-function blockData(block: Block): [string, unknown] {
+/** The one JSON key of a block; notes and the flat blocks are handled before. */
+function blockData(
+  block: Exclude<Block, { type: "note" | "project" | "project-repos" }>,
+): [string, unknown] {
   switch (block.type) {
     case "value":
       return [block.key, jsonCell(block.value)];
@@ -432,6 +455,16 @@ function blockData(block: Block): [string, unknown] {
           }),
         ),
       ];
+    case "checks":
+      return [
+        "checks",
+        block.items.map(({ id, status, message, fix }) => ({
+          id,
+          status,
+          ...(message === undefined ? {} : { message: jsonText(message) }),
+          ...(fix === undefined ? {} : { fix: jsonText(fix) }),
+        })),
+      ];
     case "leftovers":
       return [
         "leftovers",
@@ -454,14 +487,7 @@ function blockData(block: Block): [string, unknown] {
           created: created ?? null,
         })),
       ];
-    default:
-      return noRenderer(block);
   }
-}
-
-// TODO: the stories that first use these block types add their renderers (W2).
-function noRenderer(block: Block): never {
-  throw new Error(`The "${block.type}" block has no renderer yet.`);
 }
 
 function mapValues<T, U>(
@@ -521,6 +547,7 @@ function renderBlocks(
       (block) =>
         (block.type !== "table" &&
           block.type !== "repos" &&
+          block.type !== "checks" &&
           block.type !== "projects") ||
         block.items.length > 0,
     )
@@ -570,9 +597,29 @@ function renderBlock(block: Block, paint: Paint, show: Show): string {
       return renderProject(block, paint, show);
     case "project-repos":
       return renderProjectRepos(block.entries, paint);
-    default:
-      return noRenderer(block);
+    case "checks":
+      return block.items
+        .map((item) => renderCheck(item, paint, show))
+        .join("\n");
   }
+}
+
+/** `<symbol> <id>[  <message>]`, and each fix line muted under it. */
+function renderCheck(
+  { id, status, message, fix }: CheckItem,
+  paint: Paint,
+  show: Show,
+): string {
+  const { symbol, tone } = CHECK_LOOK[status];
+  const tail = message === undefined ? "" : `  ${show(message)}`;
+  const head = `${paint(tone, symbol)} ${id}${tail}`;
+  if (fix === undefined) return head;
+  const [first = "", ...rest] = show(fix).split("\n");
+  return [
+    head,
+    paint("muted", `    fix: ${first}`),
+    ...rest.map((text) => paint("muted", `      ${text}`)),
+  ].join("\n");
 }
 
 /** `<symbol> <repo>[: <message>]`, and the hint muted on the next line. */
