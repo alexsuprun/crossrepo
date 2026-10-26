@@ -61,6 +61,18 @@ describe("package.json publish contract", () => {
     expect(pkg.scripts?.release).toBe("changeset publish");
   });
 
+  test("scripts.test runs the test files in parallel with the coverage floor", () => {
+    expect(pkg.scripts?.test).toBe(
+      "bun test --coverage --parallel --timeout 30000",
+    );
+  });
+
+  test("scripts.test:no-coverage is scripts.test without coverage", () => {
+    expect(pkg.scripts?.["test:no-coverage"]).toBe(
+      pkg.scripts?.test.replace("--coverage ", ""),
+    );
+  });
+
   test("description is not empty", () => {
     expect(typeof pkg.description).toBe("string");
     expect(pkg.description.trim()).not.toBe("");
@@ -122,6 +134,29 @@ describe(".changeset/config.json", () => {
     expect(config.changelog).toEqual([
       "@changesets/changelog-github",
       { repo: "alexsuprun/crossrepo" },
+    ]);
+  });
+});
+
+// Coverage is the same on every OS, so only the fast Linux runner pays for it.
+describe(".github/workflows/ci.yml", () => {
+  const workflow = parse(
+    readFileSync(
+      new URL("../../.github/workflows/ci.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  const steps: { run?: string; if?: string }[] =
+    workflow.jobs?.checks?.steps ?? [];
+
+  test("jobs.checks runs the coverage floor on Linux and the tests without coverage elsewhere", () => {
+    expect(
+      steps
+        .filter((step) => step.run?.startsWith("bun run test"))
+        .map((step) => ({ run: step.run, if: step.if })),
+    ).toEqual([
+      { run: "bun run test", if: "runner.os == 'Linux'" },
+      { run: "bun run test:no-coverage", if: "runner.os != 'Linux'" },
     ]);
   });
 });
