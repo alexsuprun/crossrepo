@@ -1,5 +1,15 @@
 # crossrepo
 
+## 0.3.0
+
+### Minor Changes
+
+- [#104](https://github.com/alexsuprun/crossrepo/pull/104) [`682be79`](https://github.com/alexsuprun/crossrepo/commit/682be79c1acf952493032a0a4ef84a41125e4278) Thanks [@alexsuprun](https://github.com/alexsuprun)! - `xr project create` runs `project.pre-create` before it changes anything, and `xr project remove` runs `project.post-remove` after the project is gone. Both run in the codebase folder. A failed `pre-create` line stops the create with `hook-failed`. A failed `post-remove` line is a `hook-failed` warning with the hook output in a new `lines` field, and the remove still exits 0.
+
+### Patch Changes
+
+- [#101](https://github.com/alexsuprun/crossrepo/pull/101) [`354751a`](https://github.com/alexsuprun/crossrepo/commit/354751a2a74e527bc6c93f02814f7e3b411cae58) Thanks [@alexsuprun](https://github.com/alexsuprun)! - `xr project doctor`: on git 2.27 and 2.28, the `git worktree repair` fix of `codebase-path` and `worktree-not-registered` now starts with "needs git 2.29 or newer (you have <version>):", because `git worktree repair` needs git 2.29.
+
 ## 0.2.0
 
 ### Minor Changes
