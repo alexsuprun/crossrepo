@@ -46,7 +46,11 @@ jobs:
       # Coverage is the same on every OS, so only Linux, the fastest runner, measures it.
       - if: runner.os == 'Linux'
         run: bun run test
-      - if: runner.os != 'Linux'
+      # Serial on macOS: under --parallel, Bun can lose the exit of a fast git child,
+      # so a test hangs until its timeout (oven-sh/bun#45483, oven-sh/bun#41024).
+      - if: runner.os == 'macOS'
+        run: bun run test:serial
+      - if: runner.os == 'Windows'
         run: bun run test:no-coverage
 
   docs-build:

@@ -40,6 +40,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "test": "bun test --coverage --parallel --timeout 30000",
     "test:no-coverage": "bun test --parallel --timeout 30000",
+    "test:serial": "bun test --timeout 30000",
     "test:unit": "bun test tests/unit --timeout 30000",
     "test:adapters": "bun test tests/adapters --pass-with-no-tests --timeout 30000",
     "test:commands": "bun test tests/commands --pass-with-no-tests --timeout 30000",

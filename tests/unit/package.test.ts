@@ -73,6 +73,13 @@ describe("package.json publish contract", () => {
     );
   });
 
+  // macOS CI runs serially: under --parallel, Bun can lose the exit of a fast child (oven-sh/bun#45483).
+  test("scripts.test:serial is scripts.test:no-coverage without --parallel", () => {
+    expect(pkg.scripts?.["test:serial"]).toBe(
+      pkg.scripts?.["test:no-coverage"].replace("--parallel ", ""),
+    );
+  });
+
   test("description is not empty", () => {
     expect(typeof pkg.description).toBe("string");
     expect(pkg.description.trim()).not.toBe("");
@@ -149,14 +156,15 @@ describe(".github/workflows/ci.yml", () => {
   const steps: { run?: string; if?: string; shell?: string }[] =
     workflow.jobs?.checks?.steps ?? [];
 
-  test("jobs.checks runs the coverage floor on Linux and the tests without coverage elsewhere", () => {
+  test("jobs.checks runs the coverage floor on Linux, serial tests on macOS and parallel tests on Windows", () => {
     expect(
       steps
         .filter((step) => step.run?.startsWith("bun run test"))
         .map((step) => ({ run: step.run, if: step.if })),
     ).toEqual([
       { run: "bun run test", if: "runner.os == 'Linux'" },
-      { run: "bun run test:no-coverage", if: "runner.os != 'Linux'" },
+      { run: "bun run test:serial", if: "runner.os == 'macOS'" },
+      { run: "bun run test:no-coverage", if: "runner.os == 'Windows'" },
     ]);
   });
 
