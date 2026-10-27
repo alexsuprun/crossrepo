@@ -351,7 +351,8 @@ interface ProgramHooks {
   ) => void;
 }
 
-function createProgram({ write, help, select }: ProgramHooks): Command {
+/** Builds the `xr` commander program; each command action calls `select` with its unit. */
+export function createProgram({ write, help, select }: ProgramHooks): Command {
   const program: Command = new Command("xr")
     .description(
       "Create, sync and remove the same git worktree branch across many sibling repos.",

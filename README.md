@@ -53,6 +53,16 @@ xr project remove feat--login        # remove the worktrees and the project fold
 
 The [Quick start](https://alexsuprun.github.io/crossrepo/quick-start/) page shows each step with its output.
 
+## Agents
+
+Install the agent skills for any agent with `npx skills add alexsuprun/crossrepo`. In Claude Code, install them as a plugin with `/plugin marketplace add alexsuprun/crossrepo`, then `/plugin install xr@xr`. To match the skills to your `xr` version, pin its release tag: `npx skills add alexsuprun/crossrepo#v<version>`. This works from the first release that has the skills.
+
+- `xr`: runs `xr` with `--json --no-interactive`, reads the result, and handles error codes and sync conflicts.
+- `xr-init`: sets up a codebase and writes a description of each repo for `AGENTS.md`.
+- `xr-hooks`: writes project hooks in the right config file.
+
+Claude Code reads `AGENTS.md` from version 2.1.281. See [Agent skills](https://alexsuprun.github.io/crossrepo/skills/).
+
 ## Platforms
 
 | Need | Version |

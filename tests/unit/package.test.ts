@@ -57,6 +57,12 @@ describe("package.json publish contract", () => {
     expect(pkg.scripts?.prepublishOnly).toBe("bun run build");
   });
 
+  test("scripts.version-packages runs changeset version, then the plugin version sync", () => {
+    expect(pkg.scripts?.["version-packages"]).toBe(
+      "changeset version && bun scripts/sync-plugin-version.ts",
+    );
+  });
+
   test("scripts.release is changeset publish", () => {
     expect(pkg.scripts?.release).toBe("changeset publish");
   });

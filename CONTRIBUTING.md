@@ -50,7 +50,7 @@ The [changeset-bot](https://github.com/apps/changeset-bot) comments on a pull re
 ### How a release happens
 
 1. A pull request with a changeset is merged into `master`.
-2. The release workflow (`.github/workflows/release.yml`) opens or updates the `chore: version packages` pull request. It bumps the version in `package.json` and adds the entry to `CHANGELOG.md`.
+2. The release workflow (`.github/workflows/release.yml`) opens or updates the `chore: version packages` pull request. It bumps the version in `package.json` and `.claude-plugin/plugin.json`, and adds the entry to `CHANGELOG.md`.
 3. The maintainer reviews and merges that pull request.
 4. The release workflow publishes the new version to npm with provenance, creates the `vX.Y.Z` tag and the GitHub Release, and then installs the published version with npm, Bun and `bunx` to check that `--version` works.
 

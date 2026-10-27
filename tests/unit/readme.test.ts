@@ -13,6 +13,7 @@ const REQUIRED_SECTIONS = [
   "Why",
   "Install",
   "Quick start",
+  "Agents",
   "Platforms",
   "Hooks run as you",
   "Remote protocol",
