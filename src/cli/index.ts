@@ -14,6 +14,7 @@ import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
 import { configShow } from "../commands/config/show.ts";
 import { projectCreate } from "../commands/project/create.ts";
+import { projectDoctor } from "../commands/project/doctor.ts";
 import { projectInfo } from "../commands/project/info.ts";
 import { projectList } from "../commands/project/list.ts";
 import { projectRemove } from "../commands/project/remove.ts";
@@ -168,7 +169,8 @@ export async function main(options: MainOptions): Promise<number> {
     sameScreen: options.isTTY.stdout && options.isTTY.stderr,
     home: options.home,
     // A folder that is not a codebase yet shows its paths relative to `~`.
-    codebase: discovery?.kind === "none" ? undefined : discovery?.codebase,
+    codebase:
+      discovery && "codebase" in discovery ? discovery.codebase : undefined,
   });
   if (!failure) {
     try {
@@ -231,10 +233,10 @@ async function runCommand(
   }: MainOptions,
   out: Output,
 ): Promise<Report> {
-  // A folder that is not a codebase has no codebase levels, so only the user level loads.
+  // A folder with no codebase (also a broken project) has no codebase levels, so only the user level loads.
   const config = loadConfig({
     home,
-    codebase: discovery.kind === "none" ? undefined : discovery.codebase,
+    codebase: "codebase" in discovery ? discovery.codebase : undefined,
   });
   for (const unknown of command.reportsUnknownKeys ? [] : config.unknownKeys) {
     out.emit({
@@ -303,10 +305,9 @@ export function configView({
   };
 }
 
-/** `<codebase>/.crossrepo/xr.lock`; a folder that is not a codebase yet uses its own `.crossrepo/`. */
+/** `<codebase>/.crossrepo/xr.lock`; a folder with no codebase uses its own `.crossrepo/`. */
 function lockPath(discovery: Discovery): string {
-  const codebase =
-    discovery.kind === "none" ? discovery.dir : discovery.codebase;
+  const codebase = "codebase" in discovery ? discovery.codebase : discovery.dir;
   return join(codebase, ".crossrepo", "xr.lock");
 }
 
@@ -324,6 +325,8 @@ function checkKind(command: CommandUnit, discovery: Discovery): Discovery {
   if (command.accepts.includes(discovery.kind)) {
     return discovery;
   }
+  // Only a command that accepts a broken project gets past its discovery error.
+  if (discovery.kind === "broken-project") throw discovery.error;
   if (command.refuse) throw command.refuse(discovery, createFs());
   throw new XrError({
     code: "not-a-codebase",
@@ -499,6 +502,19 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
     .allowExcessArguments(false)
     .helpOption("-h, --help", "print this help")
     .action(() => select(projectSync, sync.args));
+  const doctor: Command = project
+    .command("doctor")
+    .description(
+      "check one project and its codebase, and give a fix for each problem",
+    )
+    // Optional for commander, so a missing project opens our picker or gives `missing-argument`.
+    .argument(
+      "[project]",
+      "the project folder name or branch; default: the current project",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(projectDoctor, doctor.args));
   const removeProject: Command = project
     .command("remove")
     .description(

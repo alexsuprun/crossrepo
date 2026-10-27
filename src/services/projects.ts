@@ -1,5 +1,5 @@
 import { basename, dirname, join, resolve } from "node:path";
-import type { Ctx, Tx } from "../domain/ctx.ts";
+import { type Ctx, codebaseDir, type Tx } from "../domain/ctx.ts";
 import { PROJECT_LIST_HINT } from "../domain/hints.ts";
 import {
   type NewProjectRecord,
@@ -216,6 +216,30 @@ export async function targetProject(
     return currentProject(ctx.fs, ctx.discovery.dir);
   }
   return pickProject(ctx, codebase, pick);
+}
+
+/**
+ * The folder of the project a doctor checks, in the order of `targetProject`,
+ * but a project folder gives its own folder without reading the record, so a
+ * broken record can still be checked. A name in a broken project folder
+ * throws the discovery error: there is no codebase to search. Changes nothing.
+ */
+export async function doctorProjectDir(
+  ctx: Pick<Ctx, "fs" | "config" | "out" | "prompt" | "discovery">,
+  name: string | undefined,
+  pick: ProjectPick,
+): Promise<string> {
+  const { discovery } = ctx;
+  if (discovery.kind === "broken-project") {
+    if (name !== undefined) throw discovery.error;
+    return discovery.dir;
+  }
+  const codebase = codebaseDir(discovery);
+  if (name !== undefined) {
+    return findProject(ctx, codebase, name, { lenient: true }).path;
+  }
+  if (discovery.kind === "project") return discovery.dir;
+  return (await pickProject(ctx, codebase, pick)).path;
 }
 
 /**

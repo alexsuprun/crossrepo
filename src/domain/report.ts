@@ -39,7 +39,7 @@ export interface FieldItem {
   extra?: Record<string, Text>;
 }
 
-export type CheckStatus = "ok" | "warn" | "error";
+export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 
 /** One result of a doctor check. A check with no problem gives one `ok` item with no message. */
 export interface CheckItem {

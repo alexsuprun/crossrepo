@@ -1,9 +1,14 @@
-import { basename, join } from "node:path";
-import { repoHeadings } from "../domain/agents-md.ts";
+import { basename, join, resolve } from "node:path";
+import { findSections, repoHeadings } from "../domain/agents-md.ts";
 import { repoKeys } from "../domain/codebase-config.ts";
 import type { ConfigRepoView, ConfigView, Ctx } from "../domain/ctx.ts";
+import {
+  type ProjectRecord,
+  parseProjectRecord,
+} from "../domain/project-record.ts";
 import type { Block, CheckItem, Report } from "../domain/report.ts";
 import { GitError, XrError } from "../errors/index.ts";
+import { driftFolders } from "./project-remove.ts";
 import { codebaseConfigPath } from "./repo-add.ts";
 import { repoFolders } from "./repos.ts";
 
@@ -22,6 +27,19 @@ export const CODEBASE_CHECK_IDS = [
 ] as const;
 
 type CodebaseCheckId = (typeof CODEBASE_CHECK_IDS)[number];
+
+/** The ids of the project checks, in the order they run after the codebase checks. */
+export const PROJECT_CHECK_IDS = [
+  "project-record",
+  "codebase-path",
+  "worktree-missing",
+  "worktree-not-registered",
+  "worktree-branch",
+  "project-drift",
+  "project-agents-md",
+] as const;
+
+type ProjectCheckId = (typeof PROJECT_CHECK_IDS)[number];
 
 /** A problem of one check, without the id. */
 type Problem = Omit<CheckItem, "id">;
@@ -88,21 +106,255 @@ export async function codebaseChecks(
   return CODEBASE_CHECK_IDS.flatMap((id) => itemsOf(id, results[id]));
 }
 
+const RECORD_UNREADABLE = "project record cannot be read";
+const CODEBASE_NOT_FOUND = "codebase not found";
+
 /**
- * The end of every doctor: the Report with one `checks` block, or, when an item
- * is `error`, `checks-failed` with that block next to `error`.
+ * Every item of a project doctor: the codebase checks, then the project
+ * checks. `codebase` is the codebase discovery found, if any. Checks that need
+ * data a failed check could not give are `skipped`. Reads only.
  */
-export function finishChecks(items: CheckItem[]): Report {
-  const block: Block = { type: "checks", items };
+export async function projectDoctorChecks(
+  ctx: CheckCtx,
+  project: string,
+  codebase: string | undefined,
+): Promise<CheckItem[]> {
+  const recordFile = join(project, ".crossrepo", "project.yaml");
+  const text = ctx.fs.readText(recordFile);
+  const record =
+    text === undefined
+      ? { problem: "it cannot be read" }
+      : parseProjectRecord(text, { requireBranch: true });
+  if ("problem" in record) {
+    return [
+      ...(codebase === undefined
+        ? skippedItems(CODEBASE_CHECK_IDS, RECORD_UNREADABLE)
+        : await codebaseChecks(ctx, codebase)),
+      {
+        id: "project-record",
+        status: "error",
+        message: `${recordFile}: ${record.problem}`,
+        fix: "correct `.crossrepo/project.yaml`: keys branch, codebase, repos, created",
+      },
+      ...skippedItems(PROJECT_CHECK_IDS.slice(1), RECORD_UNREADABLE),
+    ];
+  }
+  const recordCodebase = resolve(project, record.codebase);
+  const found = isCodebase(ctx, recordCodebase);
+  const worktrees = found
+    ? await worktreeProblems(ctx, project, recordCodebase, record)
+    : undefined;
+  const results: Record<ProjectCheckId, Problem[] | "skipped"> = {
+    "project-record": [],
+    "codebase-path": found
+      ? []
+      : [codebasePathProblem(project, record, recordCodebase)],
+    "worktree-missing": worktreeMissingProblems(ctx, project, record),
+    "worktree-not-registered": worktrees?.notRegistered ?? "skipped",
+    "worktree-branch": worktrees?.branch ?? "skipped",
+    "project-drift": driftFolders(ctx.fs, project, record.repos).map(
+      (folder) => ({
+        status: "error",
+        message: folder,
+        fix: `move \`${folder}\` out of the project folder`,
+      }),
+    ),
+    "project-agents-md": found
+      ? projectAgentsProblems(ctx, project, recordCodebase, record)
+      : "skipped",
+  };
+  return [
+    ...(found
+      ? await codebaseChecks(ctx, codebase ?? recordCodebase)
+      : skippedItems(CODEBASE_CHECK_IDS, CODEBASE_NOT_FOUND)),
+    ...PROJECT_CHECK_IDS.flatMap((id) => {
+      const problems = results[id];
+      return problems === "skipped"
+        ? skippedItems([id], CODEBASE_NOT_FOUND)
+        : itemsOf(id, problems);
+    }),
+  ];
+}
+
+/**
+ * The end of every doctor: the Report with `leading` and one `checks` block,
+ * or, when an item is `error`, `checks-failed` with those blocks next to `error`.
+ */
+export function finishChecks(
+  items: CheckItem[],
+  leading: readonly Block[] = [],
+): Report {
+  const blocks: Block[] = [...leading, { type: "checks", items }];
   const failed = items.filter((item) => item.status === "error").length;
   if (failed) {
     throw new XrError({
       code: "checks-failed",
       message: `${failed} ${failed === 1 ? "check" : "checks"} failed`,
-      report: [block],
+      report: blocks,
     });
   }
-  return { blocks: [block] };
+  return { blocks };
+}
+
+function skippedItems(ids: readonly string[], message: string): CheckItem[] {
+  return ids.map((id) => ({ id, status: "skipped", message }));
+}
+
+function isCodebase(ctx: CheckCtx, dir: string): boolean {
+  return ["config.yaml", "config.yml"].some((name) =>
+    ctx.fs.exists(join(dir, ".crossrepo", name)),
+  );
+}
+
+/** `<codebase>` stays as written: the right folder is not known. */
+function codebasePathProblem(
+  project: string,
+  record: ProjectRecord,
+  resolved: string,
+): Problem {
+  return {
+    status: "error",
+    message: { path: resolved },
+    fix: [
+      "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
+      ...record.repos.map(
+        (repo) =>
+          `git -C "<codebase>/${repo}" worktree repair "${join(project, repo)}"`,
+      ),
+    ].join("\n"),
+  };
+}
+
+function worktreeMissingProblems(
+  ctx: CheckCtx,
+  project: string,
+  record: ProjectRecord,
+): Problem[] {
+  const name = basename(project);
+  return record.repos
+    .filter((repo) => !ctx.fs.exists(join(project, repo)))
+    .map((repo) => ({
+      status: "error",
+      message: repo,
+      fix: `xr project repo remove ${repo} --project ${name}\nxr project repo add ${repo} --project ${name}`,
+    }));
+}
+
+/**
+ * `worktree-not-registered` and `worktree-branch` together: each existing
+ * worktree folder must be a worktree of its codebase repo (by `dev` and
+ * `ino`), readable by git, and on the record branch.
+ */
+async function worktreeProblems(
+  ctx: CheckCtx,
+  project: string,
+  codebase: string,
+  record: ProjectRecord,
+): Promise<{ notRegistered: Problem[]; branch: Problem[] }> {
+  const withGit = new Set(repoFolders(ctx.fs, codebase));
+  const notRegistered: Problem[] = [];
+  const branch: Problem[] = [];
+  const want = record.branch ?? "";
+  for (const repo of record.repos) {
+    const path = join(project, repo);
+    const self = ctx.fs.stat(path);
+    if (!self) continue;
+    const dir = join(codebase, repo);
+    const listed = withGit.has(repo)
+      ? await orUndefined(ctx.git.worktreeList(dir))
+      : undefined;
+    const readable = await readBranch(ctx, path);
+    if (listed !== undefined) {
+      const registered = listed.some(({ path: entry }) => {
+        const other = ctx.fs.stat(entry);
+        return other?.dev === self.dev && other.ino === self.ino;
+      });
+      if (!registered || !readable.ok) {
+        notRegistered.push({
+          status: "error",
+          message: { path },
+          fix: { code: `git -C "${dir}" worktree repair "${path}"` },
+        });
+      }
+    }
+    if (!readable.ok || readable.branch === want) continue;
+    branch.push({
+      status: "warn",
+      message: `${path}: ${
+        readable.branch === undefined
+          ? "detached HEAD"
+          : `on branch \`${readable.branch}\`, not \`${want}\``
+      }; \`xr project sync\` refuses this worktree`,
+      fix: { code: `git -C "${path}" switch ${want}` },
+    });
+  }
+  return { notRegistered, branch };
+}
+
+/** The current branch of a worktree, `undefined` for a detached HEAD; not `ok` when git cannot read it. */
+async function readBranch(
+  ctx: CheckCtx,
+  path: string,
+): Promise<{ ok: true; branch: string | undefined } | { ok: false }> {
+  try {
+    return { ok: true, branch: await ctx.git.currentBranch(path) };
+  } catch (error) {
+    if (error instanceof GitError) return { ok: false };
+    throw error;
+  }
+}
+
+/** `project-agents-md`, with the heading rules of `repoHeadings`. */
+function projectAgentsProblems(
+  ctx: CheckCtx,
+  project: string,
+  codebase: string,
+  record: ProjectRecord,
+): Problem[] {
+  const text = ctx.fs.readText(join(project, "AGENTS.md"));
+  if (text === undefined) {
+    return [
+      {
+        status: "warn",
+        fix: "add `AGENTS.md` with a `## Codebase` and a `## Repos` section",
+      },
+    ];
+  }
+  const problems: Problem[] = [];
+  if (findSections(text).codebase === undefined) {
+    problems.push({
+      status: "warn",
+      message: "## Codebase",
+      fix: "add a `## Codebase` section to `AGENTS.md`",
+    });
+  }
+  const titles = repoHeadings(text) ?? [];
+  const repoNames = new Set(record.repos.map((repo) => repo.toLowerCase()));
+  for (const title of titles) {
+    if (repoNames.has(title.toLowerCase())) continue;
+    problems.push({
+      status: "warn",
+      message: title,
+      fix: `remove "### ${title}" from "## Repos" in AGENTS.md`,
+    });
+  }
+  const own = new Set(titles.map((title) => title.toLowerCase()));
+  const base = ctx.fs.readText(join(codebase, "AGENTS.md"));
+  const inCodebase = new Set(
+    (base === undefined ? [] : (repoHeadings(base) ?? [])).map((title) =>
+      title.toLowerCase(),
+    ),
+  );
+  for (const repo of record.repos) {
+    const key = repo.toLowerCase();
+    if (!inCodebase.has(key) || own.has(key)) continue;
+    problems.push({
+      status: "warn",
+      message: repo,
+      fix: `add "### ${repo}" under "## Repos" in AGENTS.md (copy it from the codebase AGENTS.md)`,
+    });
+  }
+  return problems;
 }
 
 /**

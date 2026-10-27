@@ -1,18 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createFs } from "../../src/adapters/fs/index.ts";
 import { createGit } from "../../src/adapters/git/index.ts";
 import { configView } from "../../src/cli/index.ts";
 import { loadConfig } from "../../src/config/index.ts";
 import type { ConfigView, Ctx } from "../../src/domain/ctx.ts";
-import type { CheckItem } from "../../src/domain/report.ts";
+import type { Block, CheckItem } from "../../src/domain/report.ts";
 import { XrError } from "../../src/errors/index.ts";
 import {
   CODEBASE_CHECK_IDS,
   codebaseChecks,
   finishChecks,
   isReservedVarName,
+  PROJECT_CHECK_IDS,
+  projectDoctorChecks,
   rejectReservedVars,
   reservedVars,
 } from "../../src/services/doctor-checks.ts";
@@ -374,6 +376,27 @@ describe("finishChecks", () => {
     });
   });
 
+  test("leading blocks go before the checks block, also next to error", () => {
+    const head: Block = {
+      type: "value",
+      key: "project",
+      value: { path: "/p" },
+    };
+    expect(finishChecks([ok], [head])).toEqual({
+      blocks: [head, { type: "checks", items: [ok] }],
+    });
+    let thrown: unknown;
+    try {
+      finishChecks([bad], [head]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as XrError).report).toEqual([
+      head,
+      { type: "checks", items: [bad] },
+    ]);
+  });
+
   test("with errors, throws checks-failed with the count and the checks next to error", () => {
     for (const [items, message] of [
       [[ok, bad], "1 check failed"],
@@ -392,5 +415,356 @@ describe("finishChecks", () => {
       expect(error.hint).toBeUndefined();
       expect(error.report).toEqual([{ type: "checks", items: [...items] }]);
     }
+  });
+});
+
+describe("projectDoctorChecks", () => {
+  const BRANCH = "feat/x";
+  const PROJECT_AGENTS =
+    "# P\n\n## Codebase\n\nC.\n\n## Repos\n\n### api\n\nA.\n";
+  let project: string;
+  let recordFile: string;
+
+  beforeEach(() => {
+    project = join(iso.root, "work", "feat");
+    recordFile = join(project, ".crossrepo", "project.yaml");
+    git(
+      join(codebase, "api"),
+      "worktree",
+      "add",
+      "--quiet",
+      "-b",
+      BRANCH,
+      wt("api"),
+    );
+    writeRecord();
+    writeFile(join(project, "AGENTS.md"), PROJECT_AGENTS);
+  });
+
+  function wt(repo: string): string {
+    return join(project, repo);
+  }
+
+  function writeRecord(
+    lines = [
+      `branch: ${BRANCH}`,
+      `codebase: ${JSON.stringify(codebase)}`,
+      "repos:",
+      "  - api",
+    ],
+  ) {
+    writeFile(recordFile, `${lines.join("\n")}\n`);
+  }
+
+  async function projectItems(id?: string): Promise<CheckItem[]> {
+    const items = await projectDoctorChecks(ctx(), project, codebase);
+    return id === undefined ? items : items.filter((item) => item.id === id);
+  }
+
+  const skipped = (id: string, message: string): CheckItem => ({
+    id,
+    status: "skipped",
+    message,
+  });
+
+  test("a healthy project: the 7 codebase checks then the 7 project checks, all ok", async () => {
+    const items = await projectItems();
+    expect(items).toEqual(
+      [...CODEBASE_CHECK_IDS, ...PROJECT_CHECK_IDS].map((id) => ({
+        id,
+        status: "ok",
+      })),
+    );
+    expect<string[]>([...PROJECT_CHECK_IDS]).toEqual([
+      "project-record",
+      "codebase-path",
+      "worktree-missing",
+      "worktree-not-registered",
+      "worktree-branch",
+      "project-drift",
+      "project-agents-md",
+    ]);
+  });
+
+  test("project-record: no branch is an error, checks 2 to 7 skipped, codebase checks still run", async () => {
+    writeRecord([`codebase: ${JSON.stringify(codebase)}`, "repos:", "  - api"]);
+    const items = await projectItems();
+    expect(items.slice(0, 7)).toEqual(
+      CODEBASE_CHECK_IDS.map((id) => ({ id, status: "ok" })),
+    );
+    expect(items.slice(7)).toEqual([
+      {
+        id: "project-record",
+        status: "error",
+        message: `${recordFile}: it has no \`branch\``,
+        fix: "correct `.crossrepo/project.yaml`: keys branch, codebase, repos, created",
+      },
+      ...PROJECT_CHECK_IDS.slice(1).map((id) =>
+        skipped(id, "project record cannot be read"),
+      ),
+    ]);
+  });
+
+  test("project-record: with no codebase found, the codebase checks are skipped too", async () => {
+    writeFile(recordFile, "a: [\n");
+    const items = await projectDoctorChecks(ctx(), project, undefined);
+    expect(items.slice(0, 7)).toEqual(
+      CODEBASE_CHECK_IDS.map((id) =>
+        skipped(id, "project record cannot be read"),
+      ),
+    );
+    expect(items[7]).toMatchObject({
+      id: "project-record",
+      status: "error",
+    });
+    expect(String(items[7]?.message)).toStartWith(
+      `${recordFile}: it is not valid YAML`,
+    );
+  });
+
+  test("project-record: a missing record cannot be read", async () => {
+    rmSync(recordFile);
+    expect(await projectItems("project-record")).toEqual([
+      {
+        id: "project-record",
+        status: "error",
+        message: `${recordFile}: it cannot be read`,
+        fix: "correct `.crossrepo/project.yaml`: keys branch, codebase, repos, created",
+      },
+    ]);
+  });
+
+  test("codebase-path: a gone codebase is an error with the repair lines; codebase checks and 4, 5, 7 skipped; 3 and 6 run", async () => {
+    const gone = join(iso.root, "gone");
+    writeRecord([
+      `branch: ${BRANCH}`,
+      "codebase: ../../gone",
+      "repos:",
+      "  - api",
+      "  - web",
+    ]);
+    const items = await projectDoctorChecks(ctx(), project, undefined);
+    const notFound = "codebase not found";
+    expect(items).toEqual([
+      ...CODEBASE_CHECK_IDS.map((id) => skipped(id, notFound)),
+      { id: "project-record", status: "ok" },
+      {
+        id: "codebase-path",
+        status: "error",
+        message: { path: gone },
+        fix: [
+          "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
+          `git -C "<codebase>/api" worktree repair "${wt("api")}"`,
+          `git -C "<codebase>/web" worktree repair "${wt("web")}"`,
+        ].join("\n"),
+      },
+      {
+        id: "worktree-missing",
+        status: "error",
+        message: "web",
+        fix: "xr project repo remove web --project feat\nxr project repo add web --project feat",
+      },
+      skipped("worktree-not-registered", notFound),
+      skipped("worktree-branch", notFound),
+      { id: "project-drift", status: "ok" },
+      skipped("project-agents-md", notFound),
+    ]);
+  });
+
+  test("codebase-path: a folder that is not a codebase is an error", async () => {
+    const plain = join(iso.root, "plain");
+    mkdirSync(plain);
+    writeRecord([
+      `branch: ${BRANCH}`,
+      `codebase: ${JSON.stringify(plain)}`,
+      "repos: []",
+    ]);
+    expect(
+      (await projectDoctorChecks(ctx(), project, undefined)).find(
+        (item) => item.id === "codebase-path",
+      ),
+    ).toMatchObject({ status: "error", message: { path: plain } });
+  });
+
+  test("worktree-missing: one error per record repo with no folder", async () => {
+    rmSync(wt("api"), { recursive: true, force: true });
+    expect(await projectItems("worktree-missing")).toEqual([
+      {
+        id: "worktree-missing",
+        status: "error",
+        message: "api",
+        fix: "xr project repo remove api --project feat\nxr project repo add api --project feat",
+      },
+    ]);
+    expect(await projectItems("worktree-not-registered")).toEqual([
+      { id: "worktree-not-registered", status: "ok" },
+    ]);
+  });
+
+  test("worktree-not-registered: a moved project folder is an error with the repair fix", async () => {
+    const moved = join(iso.root, "work", "moved");
+    renameSync(project, moved);
+    project = moved;
+    expect(await projectItems("worktree-not-registered")).toEqual([
+      {
+        id: "worktree-not-registered",
+        status: "error",
+        message: { path: wt("api") },
+        fix: {
+          code: `git -C "${join(codebase, "api")}" worktree repair "${wt("api")}"`,
+        },
+      },
+    ]);
+    expect(await projectItems("worktree-branch")).toEqual([
+      { id: "worktree-branch", status: "ok" },
+    ]);
+  });
+
+  test("worktree-not-registered: a worktree git cannot read is one error, and no worktree-branch item", async () => {
+    writeFile(join(wt("api"), ".git"), "gitdir: /nowhere/at/all\n");
+    expect(await projectItems("worktree-not-registered")).toEqual([
+      {
+        id: "worktree-not-registered",
+        status: "error",
+        message: { path: wt("api") },
+        fix: {
+          code: `git -C "${join(codebase, "api")}" worktree repair "${wt("api")}"`,
+        },
+      },
+    ]);
+    expect(await projectItems("worktree-branch")).toEqual([
+      { id: "worktree-branch", status: "ok" },
+    ]);
+  });
+
+  test("worktree-not-registered: a repo whose codebase folder is missing gives no item", async () => {
+    writeRecord([
+      `branch: ${BRANCH}`,
+      `codebase: ${JSON.stringify(codebase)}`,
+      "repos:",
+      "  - api",
+      "  - docs",
+    ]);
+    mkdirSync(wt("docs"));
+    expect(await projectItems("worktree-not-registered")).toEqual([
+      { id: "worktree-not-registered", status: "ok" },
+    ]);
+  });
+
+  test("worktree-not-registered: a codebase repo whose .git cannot be read gives no item", async () => {
+    rmSync(join(codebase, "api", ".git"), { recursive: true, force: true });
+    writeFile(join(codebase, "api", ".git"), "gitdir: /nope/x\n");
+    expect(await projectItems("worktree-not-registered")).toEqual([
+      { id: "worktree-not-registered", status: "ok" },
+    ]);
+  });
+
+  test("worktree-branch: another branch is a warn with the switch fix", async () => {
+    git(wt("api"), "switch", "--quiet", "-c", "other");
+    expect(await projectItems("worktree-branch")).toEqual([
+      {
+        id: "worktree-branch",
+        status: "warn",
+        message: `${wt("api")}: on branch \`other\`, not \`${BRANCH}\`; \`xr project sync\` refuses this worktree`,
+        fix: { code: `git -C "${wt("api")}" switch ${BRANCH}` },
+      },
+    ]);
+  });
+
+  test("worktree-branch: a detached HEAD is a warn", async () => {
+    git(wt("api"), "switch", "--quiet", "--detach");
+    expect(await projectItems("worktree-branch")).toEqual([
+      {
+        id: "worktree-branch",
+        status: "warn",
+        message: `${wt("api")}: detached HEAD; \`xr project sync\` refuses this worktree`,
+        fix: { code: `git -C "${wt("api")}" switch ${BRANCH}` },
+      },
+    ]);
+  });
+
+  test("project-drift: one error per extra folder; dot folders and files do not count", async () => {
+    mkdirSync(join(project, "tmp"));
+    mkdirSync(join(project, ".idea"));
+    writeFile(join(project, "notes.txt"), "x");
+    expect(await projectItems("project-drift")).toEqual([
+      {
+        id: "project-drift",
+        status: "error",
+        message: "tmp",
+        fix: "move `tmp` out of the project folder",
+      },
+    ]);
+  });
+
+  test("project-agents-md: no AGENTS.md is one warn with no message", async () => {
+    rmSync(join(project, "AGENTS.md"));
+    expect(await projectItems("project-agents-md")).toEqual([
+      {
+        id: "project-agents-md",
+        status: "warn",
+        fix: "add `AGENTS.md` with a `## Codebase` and a `## Repos` section",
+      },
+    ]);
+  });
+
+  test("project-agents-md: no ## Codebase, a stray heading and a missing repo heading", async () => {
+    writeRecord([
+      `branch: ${BRANCH}`,
+      `codebase: ${JSON.stringify(codebase)}`,
+      "repos:",
+      "  - api",
+      "  - web",
+    ]);
+    git(
+      join(codebase, "web"),
+      "worktree",
+      "add",
+      "--quiet",
+      "-b",
+      BRANCH,
+      wt("web"),
+    );
+    writeFile(
+      join(project, "AGENTS.md"),
+      "# P\n\n## Repos\n\n### API \n\n```\n### web\n```\n\n### old\n",
+    );
+    expect(await projectItems("project-agents-md")).toEqual([
+      {
+        id: "project-agents-md",
+        status: "warn",
+        message: "## Codebase",
+        fix: "add a `## Codebase` section to `AGENTS.md`",
+      },
+      {
+        id: "project-agents-md",
+        status: "warn",
+        message: "old",
+        fix: 'remove "### old" from "## Repos" in AGENTS.md',
+      },
+      {
+        id: "project-agents-md",
+        status: "warn",
+        message: "web",
+        fix: 'add "### web" under "## Repos" in AGENTS.md (copy it from the codebase AGENTS.md)',
+      },
+    ]);
+  });
+
+  test("project-agents-md: a repo with no codebase heading needs no project heading; no ## Repos counts as no titles", async () => {
+    writeFile(join(codebase, "AGENTS.md"), "# Team\n\n## Repos\n\n### web\n");
+    writeFile(join(project, "AGENTS.md"), "## Codebase\n\nC.\n");
+    expect(await projectItems("project-agents-md")).toEqual([
+      { id: "project-agents-md", status: "ok" },
+    ]);
+    writeFile(join(codebase, "AGENTS.md"), AGENTS);
+    expect(await projectItems("project-agents-md")).toEqual([
+      {
+        id: "project-agents-md",
+        status: "warn",
+        message: "api",
+        fix: 'add "### api" under "## Repos" in AGENTS.md (copy it from the codebase AGENTS.md)',
+      },
+    ]);
   });
 });
