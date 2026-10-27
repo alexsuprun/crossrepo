@@ -12,7 +12,16 @@ export default defineConfig({
 			title: 'crossrepo',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/alexsuprun/crossrepo' }],
 			sidebar: [
+				{ label: 'Overview', slug: 'index' },
 				{ label: 'Install', slug: 'install' },
+				{ label: 'Quick start', slug: 'quick-start' },
+				{
+					label: 'Guides',
+					items: [
+						{ label: 'Config', slug: 'guides/config' },
+						{ label: 'Hooks', slug: 'guides/hooks' },
+					],
+				},
 				{ label: 'Output and errors', slug: 'output' },
 				{
 					label: 'Commands',
