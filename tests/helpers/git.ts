@@ -103,14 +103,27 @@ function repoTemplate({
   const repo = join(base, "repo");
   mkdirSync(repo);
   git(repo, "init", "--quiet", `--initial-branch=${branch}`);
-  git(repo, "commit", "--quiet", "--allow-empty", "-m", "first");
+  // No background git may write into a template while it is copied: git runs
+  // auto maintenance in the background after a commit, and auto gc after a push.
+  git(
+    repo,
+    ...["-c", "maintenance.auto=false", "-c", "gc.auto=0"],
+    ...["commit", "--quiet", "--allow-empty", "-m", "first"],
+  );
   const template: RepoTemplate = { repo };
   if (origin) {
+    // The origin is a bare copy of the repo's .git, so no push runs.
     const remote = join(base, "origin.git");
-    mkdirSync(remote);
-    git(remote, "init", "--quiet", "--bare", `--initial-branch=${branch}`);
+    cpSync(join(repo, ".git"), remote, { recursive: true });
+    rmSync(join(remote, "index"));
+    const config = join(remote, "config");
+    const text = readFileSync(config, "utf8");
+    if (!text.includes("bare = false")) {
+      throw new Error(`makeRepos: no bare setting in ${config}`);
+    }
+    writeFileSync(config, text.replace("bare = false", "bare = true"));
     git(repo, "remote", "add", "origin", remote);
-    git(repo, "push", "--quiet", "origin", branch);
+    git(repo, "update-ref", `refs/remotes/origin/${branch}`, "HEAD");
     if (head) git(repo, "remote", "set-head", "origin", branch);
     template.origin = remote;
   }

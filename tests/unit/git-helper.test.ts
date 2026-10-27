@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { delimiter, join } from "node:path";
 import {
   git,
   makeRepos,
@@ -80,6 +87,54 @@ describe("makeRepos", () => {
       git(join(iso.root, "second", "api"), "rev-parse", "HEAD").trim(),
     ).toMatch(/^[0-9a-f]{40}$/);
   });
+
+  test.skipIf(process.platform === "win32")(
+    "a template build starts no background git: no push, and no auto maintenance after the commit",
+    () => {
+      const real = spawnSync("sh", ["-c", "command -v git"], {
+        encoding: "utf8",
+      }).stdout.trim();
+      const bin = join(iso.root, "bin");
+      mkdirSync(bin);
+      const log = join(iso.root, "git-calls.log");
+      writeFileSync(
+        join(bin, "git"),
+        `#!/bin/sh\necho "$*" >> "${log}"\nexec "${real}" "$@"\n`,
+      );
+      chmodSync(join(bin, "git"), 0o755);
+      const path = process.env.PATH;
+      process.env.PATH = `${bin}${delimiter}${path}`;
+      let remotes: Record<string, string | undefined>;
+      try {
+        remotes = makeRepos(join(iso.root, "shop"), {
+          api: { branch: "no-background" },
+        });
+      } finally {
+        process.env.PATH = path;
+      }
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      expect(calls.filter((call) => / push /.test(` ${call} `))).toEqual([]);
+      const commits = calls.filter((call) => / commit /.test(` ${call} `));
+      expect(commits).toHaveLength(1);
+      expect(commits[0]).toContain("-c maintenance.auto=false");
+      expect(commits[0]).toContain("-c gc.auto=0");
+
+      const origin = remotes.api as string;
+      const api = join(iso.root, "shop", "api");
+      const headOf = (dir: string, ref: string) =>
+        git(dir, "rev-parse", ref).trim();
+      expect(git(origin, "rev-parse", "--is-bare-repository").trim()).toBe(
+        "true",
+      );
+      expect(headOf(origin, "refs/heads/no-background")).toBe(
+        headOf(api, "HEAD"),
+      );
+      expect(headOf(api, "origin/no-background")).toBe(headOf(api, "HEAD"));
+      expect(git(api, "rev-parse", "--abbrev-ref", "origin/HEAD").trim()).toBe(
+        "origin/no-background",
+      );
+    },
+  );
 });
 
 for (const file of ["bunfig.toml", "bunfig.smoke.toml"]) {
