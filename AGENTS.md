@@ -12,13 +12,14 @@ Instructions for AI agents working on crossrepo. These rules apply as code arriv
 - `bun run typecheck`: typecheck `src/` and, separately, `tests/` and `scripts/`.
 - `bun run test`: run the unit, adapter and command tests with the coverage floor. The test files run in parallel worker processes. It does not run smoke tests.
 - `bun run test:no-coverage`: run the same tests without coverage.
+- `bun run test:serial`: run the same tests without coverage, one file at a time. Use it on macOS when a parallel run hangs: under `--parallel`, Bun can lose the exit of a fast child process (oven-sh/bun#45483).
 - `bun run test:unit`: run the tests in `tests/unit/`.
 - `bun run test:adapters`: run the tests in `tests/adapters/`.
 - `bun run test:commands`: run the tests in `tests/commands/`.
 - `bun run test:smoke`: build `dist/xr.js`, then run the `*.smoke.ts` files in `tests/smoke/` against it under Node and under Bun.
 - `bun run build`: bundle the CLI to `dist/xr.js`.
 
-CI (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test` and `test:smoke` on Linux, macOS and Windows. Only Linux runs `test` with coverage; macOS and Windows run `test:no-coverage`. Set `XR_SMOKE_RUNTIMES=bun` (a comma list of `node` and `bun`; default both) to run the smoke tests under Bun only.
+CI (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test` and `test:smoke` on Linux, macOS and Windows. Only Linux runs `test` with coverage; macOS runs `test:serial` and Windows runs `test:no-coverage`. Set `XR_SMOKE_RUNTIMES=bun` (a comma list of `node` and `bun`; default both) to run the smoke tests under Bun only.
 
 Renovate (`renovate.json`) updates dependencies, Action hashes and the Bun version. Do not bump pins by hand, and set the Bun version only in `packageManager` in `package.json`.
 
