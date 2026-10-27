@@ -1,0 +1,15 @@
+{
+  "name": "xr",
+  "description": "The xr plugin: agent skills for the crossrepo CLI xr.",
+  "owner": {
+    "name": "Alex Suprun",
+    "url": "https://github.com/alexsuprun"
+  },
+  "plugins": [
+    {
+      "name": "xr",
+      "source": "./",
+      "description": "Agent skills for the crossrepo CLI xr."
+    }
+  ]
+}

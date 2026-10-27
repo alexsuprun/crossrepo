@@ -47,6 +47,8 @@
     "test:smoke": "bun run build && bun --config=bunfig.smoke.toml test ./tests/smoke/*.smoke.ts",
     "build": "bun build src/cli/bin.ts --target node --outfile dist/xr.js --define XR_VERSION=\\\"$npm_package_version\\\"",
     "validate": "bun scripts/validate.ts",
+    "skills:refs": "bun scripts/skills-refs.ts",
+    "version-packages": "changeset version && bun scripts/sync-plugin-version.ts",
     "validate:loud": "bun run lint && bun run typecheck && bun run test && bun run test:smoke",
     "release": "changeset publish",
     "prepublishOnly": "bun run build",

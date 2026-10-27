@@ -1,0 +1,13 @@
+{
+  "name": "xr",
+  "version": "0.3.0",
+  "description": "Agent skills for the crossrepo CLI xr: run xr and act on its results, set up a codebase and describe its repos, and write project hooks.",
+  "author": {
+    "name": "Alex Suprun",
+    "url": "https://github.com/alexsuprun"
+  },
+  "homepage": "https://alexsuprun.github.io/crossrepo/skills/",
+  "repository": "https://github.com/alexsuprun/crossrepo",
+  "license": "MIT",
+  "keywords": ["crossrepo", "xr", "git-worktree", "multi-repo", "agents-md"]
+}

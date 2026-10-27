@@ -22,6 +22,7 @@ export default defineConfig({
 						{ label: 'Hooks', slug: 'guides/hooks' },
 					],
 				},
+				{ label: 'Agent skills', slug: 'skills' },
 				{ label: 'Output and errors', slug: 'output' },
 				{
 					label: 'Commands',
