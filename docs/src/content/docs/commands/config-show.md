@@ -42,7 +42,7 @@ project.post-create =                       .crossrepo/config.yaml
 
 ## `projects-dir`
 
-`projects-dir` is the folder that holds the projects. `xr config show` prints the value as written and the `resolved` absolute path.
+`projects-dir` is the folder that holds the projects. In text mode, `xr config show` prints the value as written and the `resolved` path, like every path in text mode: relative to the codebase folder, else with `~`, else absolute. `--json` always gives the absolute path in `resolved`.
 
 - A relative path is relative to the codebase folder, at every level.
 - A leading `~` is your home folder.
