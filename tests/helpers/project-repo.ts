@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, spyOn } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import * as gitAdapter from "../../src/adapters/git/index.ts";
 import { main } from "../../src/cli/index.ts";
@@ -227,4 +233,26 @@ export function outsideSections(text: string): string {
     rest = rest.slice(0, start) + rest.slice(end);
   }
   return rest;
+}
+
+/** Every file under `dir` with its text, skipping the inside of `.git` folders. */
+export function snapshot(dir: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const name of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+    if (/(^|[\\/])\.git([\\/]|$)/.test(name)) continue;
+    const path = join(dir, name);
+    files[name] = statSync(path).isDirectory()
+      ? "<dir>"
+      : readFileSync(path, "utf8");
+  }
+  return files;
+}
+
+/** The refs and worktree list of the repo `repo` in `codebase`. */
+export function gitRefs(codebase: string, repo: string) {
+  const dir = join(codebase, repo);
+  return {
+    refs: git(dir, "for-each-ref"),
+    worktrees: git(dir, "worktree", "list", "--porcelain"),
+  };
 }
