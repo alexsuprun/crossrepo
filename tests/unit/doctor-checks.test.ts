@@ -60,10 +60,17 @@ function config(): ConfigView {
   return configView(loadConfig({ home: iso.home, codebase }));
 }
 
-function ctx(view: ConfigView = config()): Pick<Ctx, "fs" | "git" | "config"> {
+/** `gitVersion` stands in for `git version`, so the fix texts do not depend on the git of the machine. */
+function ctx(
+  view: ConfigView = config(),
+  gitVersion = "2.45.1",
+): Pick<Ctx, "fs" | "git" | "config"> {
   return {
     fs: createFs(),
-    git: createGit({ interactive: false, env: { ...process.env } }),
+    git: {
+      ...createGit({ interactive: false, env: { ...process.env } }),
+      version: async () => gitVersion,
+    },
     config: view,
   };
 }
@@ -456,8 +463,15 @@ describe("projectDoctorChecks", () => {
     writeFile(recordFile, `${lines.join("\n")}\n`);
   }
 
-  async function projectItems(id?: string): Promise<CheckItem[]> {
-    const items = await projectDoctorChecks(ctx(), project, codebase);
+  async function projectItems(
+    id?: string,
+    gitVersion?: string,
+  ): Promise<CheckItem[]> {
+    const items = await projectDoctorChecks(
+      ctx(config(), gitVersion),
+      project,
+      codebase,
+    );
     return id === undefined ? items : items.filter((item) => item.id === id);
   }
 
@@ -571,6 +585,69 @@ describe("projectDoctorChecks", () => {
     ]);
   });
 
+  // `git worktree repair` needs git 2.29; the floor is 2.27.
+  test("codebase-path: on git older than 2.29 the fix starts with the needs line", async () => {
+    writeRecord([
+      `branch: ${BRANCH}`,
+      "codebase: ../../gone",
+      "repos:",
+      "  - api",
+    ]);
+    const items = await projectDoctorChecks(
+      ctx(config(), "2.28.0"),
+      project,
+      undefined,
+    );
+    expect(items.find((item) => item.id === "codebase-path")?.fix).toBe(
+      [
+        "needs git 2.29 or newer (you have 2.28.0):",
+        "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
+        `git -C "<codebase>/api" worktree repair "${wt("api")}"`,
+      ].join("\n"),
+    );
+  });
+
+  test("codebase-path: on git 2.29 the fix has no needs line", async () => {
+    writeRecord([
+      `branch: ${BRANCH}`,
+      "codebase: ../../gone",
+      "repos:",
+      "  - api",
+    ]);
+    const items = await projectDoctorChecks(
+      ctx(config(), "2.29.0"),
+      project,
+      undefined,
+    );
+    expect(items.find((item) => item.id === "codebase-path")?.fix).toBe(
+      [
+        "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
+        `git -C "<codebase>/api" worktree repair "${wt("api")}"`,
+      ].join("\n"),
+    );
+  });
+
+  test("codebase-path: when git cannot say its version, the fix has no needs line", async () => {
+    writeRecord([
+      `branch: ${BRANCH}`,
+      "codebase: ../../gone",
+      "repos:",
+      "  - api",
+    ]);
+    const base = ctx();
+    const failing = {
+      ...base,
+      git: {
+        ...base.git,
+        version: () => Promise.reject(new Error("no git")),
+      },
+    };
+    const items = await projectDoctorChecks(failing, project, undefined);
+    expect(
+      String(items.find((item) => item.id === "codebase-path")?.fix),
+    ).toStartWith("set `codebase`");
+  });
+
   test("codebase-path: a folder that is not a codebase is an error", async () => {
     const plain = join(iso.root, "plain");
     mkdirSync(plain);
@@ -618,6 +695,36 @@ describe("projectDoctorChecks", () => {
     expect(await projectItems("worktree-branch")).toEqual([
       { id: "worktree-branch", status: "ok" },
     ]);
+  });
+
+  test("worktree-not-registered: on git older than 2.29 the fix starts with the needs line", async () => {
+    const moved = join(iso.root, "work", "moved");
+    renameSync(project, moved);
+    project = moved;
+    expect(
+      await projectItems("worktree-not-registered", "2.27.0.windows.1"),
+    ).toEqual([
+      {
+        id: "worktree-not-registered",
+        status: "error",
+        message: { path: wt("api") },
+        fix: [
+          "needs git 2.29 or newer (you have 2.27.0.windows.1):",
+          `git -C "${join(codebase, "api")}" worktree repair "${wt("api")}"`,
+        ].join("\n"),
+      },
+    ]);
+  });
+
+  test("worktree-not-registered: on git 2.29 the fix is the repair code", async () => {
+    const moved = join(iso.root, "work", "moved");
+    renameSync(project, moved);
+    project = moved;
+    expect(
+      (await projectItems("worktree-not-registered", "2.29.0"))[0]?.fix,
+    ).toEqual({
+      code: `git -C "${join(codebase, "api")}" worktree repair "${wt("api")}"`,
+    });
   });
 
   test("worktree-not-registered: a worktree git cannot read is one error, and no worktree-branch item", async () => {

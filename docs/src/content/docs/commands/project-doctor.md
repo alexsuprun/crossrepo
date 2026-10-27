@@ -38,9 +38,9 @@ A config that cannot load, for example a file with invalid YAML, still fails bef
 | Id | Status | Problem | Message | Fix |
 | --- | --- | --- | --- | --- |
 | `project-record` | `error` | `.crossrepo/project.yaml` of the project cannot be read, or it is not a valid record (for example invalid YAML, or no `branch`). | `<record path>: <problem>` | ``correct `.crossrepo/project.yaml`: keys branch, codebase, repos, created`` |
-| `codebase-path` | `error` | The `codebase` of the record, resolved from the project folder, does not exist or has no `.crossrepo/config.yaml` (or `config.yml`). | The resolved path. | ``set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:`` and one `git -C "<codebase>/<repo>" worktree repair "<worktree path>"` line per repo of the record. |
+| `codebase-path` | `error` | The `codebase` of the record, resolved from the project folder, does not exist or has no `.crossrepo/config.yaml` (or `config.yml`). | The resolved path. | ``set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:`` and one `git -C "<codebase>/<repo>" worktree repair "<worktree path>"` line per repo of the record. On git older than 2.29, the first line is `needs git 2.29 or newer (you have <version>):`. |
 | `worktree-missing` | `error` | A repo of the record with no folder in the project folder. | The repo name. | `xr project repo remove <repo> --project <project>`, then `xr project repo add <repo> --project <project>`, with the project folder name. |
-| `worktree-not-registered` | `error` | A worktree folder that is not a worktree of its repo in the codebase (for example after you moved the project folder), or whose git cannot be read (for example after the codebase moved). | The worktree path. | `git -C "<codebase>/<repo>" worktree repair "<worktree path>"` |
+| `worktree-not-registered` | `error` | A worktree folder that is not a worktree of its repo in the codebase (for example after you moved the project folder), or whose git cannot be read (for example after the codebase moved). | The worktree path. | `git -C "<codebase>/<repo>" worktree repair "<worktree path>"`. On git older than 2.29, the first line is `needs git 2.29 or newer (you have <version>):`. |
 | `worktree-branch` | `warn` | A worktree on another branch than the record `branch`, or with a detached HEAD. | The worktree path, the branch it is on (or `detached HEAD`), and that `xr project sync` refuses this worktree. | `git -C "<worktree path>" switch <branch>` |
 | `project-drift` | `error` | A folder in the project folder that is not a repo of the record. | The folder name. | ``move `<folder>` out of the project folder`` |
 | `project-agents-md` | `warn` | The project `AGENTS.md` is missing, or does not match the repos. | See below. | See below. |
@@ -163,6 +163,8 @@ On a failure, `project` and `checks` sit next to `error`. Here the codebase move
   }
 }
 ```
+
+This output is from git 2.29 or newer. `git worktree repair` needs git 2.29, so on git 2.27 and 2.28 the `fix` starts with the line `needs git 2.29 or newer (you have 2.28.0):`, then the same lines.
 
 ## Errors
 

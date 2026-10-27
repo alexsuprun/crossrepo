@@ -239,12 +239,15 @@ describe("createGit mergeAutostash", () => {
     pushCommit(origin, { file: "theirs.txt" });
     commitLocal("mine.txt", "mine\n");
     git(repo, "fetch", "--quiet", "origin");
-    const empty = join(iso.root, "empty-gitconfig");
-    writeFileSync(empty, "");
+    // An empty HOME has no .gitconfig, so the global config has no identity.
+    const empty = join(iso.root, "empty-home");
+    mkdirSync(empty);
     git(repo, "config", "user.useConfigOnly", "true");
     const error = await adapter({
       ...process.env,
-      GIT_CONFIG_GLOBAL: empty,
+      HOME: empty,
+      USERPROFILE: empty,
+      XDG_CONFIG_HOME: empty,
       EMAIL: undefined,
       GIT_AUTHOR_NAME: undefined,
       GIT_AUTHOR_EMAIL: undefined,

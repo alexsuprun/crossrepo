@@ -183,6 +183,117 @@ describe(".github/workflows/ci.yml", () => {
     });
     expect(defender).toBeLessThan(firstTest);
   });
+
+  interface Step {
+    uses?: string;
+    run?: string;
+    with?: Record<string, unknown>;
+  }
+  interface Job {
+    name?: string;
+    "runs-on"?: string;
+    "timeout-minutes"?: number;
+    strategy?: { "fail-fast"?: boolean; matrix?: Record<string, unknown> };
+    steps?: Step[];
+  }
+  const jobs: Record<string, Job> = workflow.jobs ?? {};
+  const OSES = ["ubuntu-latest", "macos-latest", "windows-latest"];
+  const runs = (job: Job | undefined) =>
+    (job?.steps ?? []).flatMap((step) => (step.run ? [step.run] : []));
+  const indexOfRun = (job: Job | undefined, text: string) =>
+    runs(job).findIndex((run) => run.includes(text));
+
+  test("every job sets timeout-minutes, and every matrix job sets fail-fast: false", () => {
+    for (const [name, job] of Object.entries(jobs)) {
+      expect({ name, timeout: typeof job["timeout-minutes"] }).toEqual({
+        name,
+        timeout: "number",
+      });
+      if (job.strategy?.matrix) {
+        expect({ name, failFast: job.strategy["fail-fast"] }).toEqual({
+          name,
+          failFast: false,
+        });
+      }
+    }
+  });
+
+  // Node 26 is LTS from 2026-10-28; 22.13 is the floor in engines.node.
+  test("jobs.smoke runs Node 22.13, 24 and 26 on 3 OS", () => {
+    expect(jobs.smoke?.strategy?.matrix).toEqual({
+      os: OSES,
+      node: ["22.13", "24", "26"],
+    });
+  });
+
+  // NFR12: the real tarball, installed with npm, does the round trip.
+  describe("jobs.e2e", () => {
+    const job = jobs.e2e;
+
+    test("is named e2e (<os>) and runs on 3 OS", () => {
+      // A GitHub expression, not a JS template.
+      const os = ["$", "{{ matrix.os }}"].join("");
+      expect(job?.name).toBe(`e2e (${os})`);
+      expect(job?.["runs-on"]).toBe(os);
+      expect(job?.strategy?.matrix).toEqual({ os: OSES });
+    });
+
+    test("runs under Node 22.13", () => {
+      const setups = (job?.steps ?? []).filter((step) =>
+        step.uses?.startsWith("actions/setup-node@"),
+      );
+      expect(setups.map((step) => step.with?.["node-version"])).toEqual([
+        "22.13",
+      ]);
+    });
+
+    test("builds, packs, installs the tarball with npm i -g, then runs the round-trip script, in this order", () => {
+      const order = [
+        "bun run build",
+        "npm pack",
+        "npm i -g ./crossrepo-",
+        "tests/e2e/round-trip.ts",
+      ].map((text) => indexOfRun(job, text));
+      expect(order.every((index) => index >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    test("runs the script with Node and the installed xr, not with --xr", () => {
+      const script = runs(job).find((run) =>
+        run.includes("tests/e2e/round-trip.ts"),
+      );
+      expect(script).toStartWith("node --experimental-strip-types ");
+      expect(script).not.toContain("--xr");
+    });
+  });
+
+  // The git floor is 2.27 (MIN_VERSION in the git adapter).
+  describe("jobs.git-floor", () => {
+    const job = jobs["git-floor"];
+
+    test("is named git-floor and runs on ubuntu-latest", () => {
+      expect(job?.name).toBe("git-floor");
+      expect(job?.["runs-on"]).toBe("ubuntu-latest");
+    });
+
+    test("caches the git 2.27.0 build with a key on the version", () => {
+      const cache = (job?.steps ?? []).find((step) =>
+        step.uses?.startsWith("actions/cache@"),
+      );
+      expect(cache?.uses).toMatch(/^actions\/cache@[0-9a-f]{40}$/);
+      expect(String(cache?.with?.key)).toContain("2.27.0");
+      expect(String(cache?.with?.path)).toContain("git-2.27");
+    });
+
+    test("checks git --version is 2.27.0, then runs test:commands and test:smoke", () => {
+      const check = indexOfRun(job, "git version 2.27.0");
+      const commands = indexOfRun(job, "bun run test:commands");
+      const smoke = indexOfRun(job, "bun run test:smoke");
+      expect(check).toBeGreaterThanOrEqual(0);
+      expect(commands).toBeGreaterThan(check);
+      expect(smoke).toBeGreaterThan(check);
+    });
+  });
 });
 
 // The npm Trusted Publisher fixes the file name release.yml and environment npm.
@@ -211,6 +322,23 @@ describe(".github/workflows/release.yml", () => {
 
   test("top-level permissions are contents: read", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
+  });
+
+  // The step name says Node 22.13, the floor in engines.node (D57).
+  test("jobs.smoke installs under Node 22.13", () => {
+    const steps =
+      (jobs.smoke as { steps?: { uses?: string; with?: unknown }[] })?.steps ??
+      [];
+    expect(
+      steps
+        .filter((step) => step.uses?.startsWith("actions/setup-node@"))
+        .map(
+          (step) =>
+            (step.with as Record<string, unknown> | undefined)?.[
+              "node-version"
+            ],
+        ),
+    ).toEqual(["22.13"]);
   });
 
   test("id-token: write is set only on jobs.release", () => {
@@ -251,6 +379,17 @@ describe(".github/workflows setup-node", () => {
           (setup.with as Record<string, unknown> | undefined)?.[
             "check-latest"
           ] !== true,
+      ),
+    ).toEqual([]);
+  });
+
+  test("each one sets package-manager-cache: false", () => {
+    expect(
+      setups.filter(
+        (setup) =>
+          (setup.with as Record<string, unknown> | undefined)?.[
+            "package-manager-cache"
+          ] !== false,
       ),
     ).toEqual([]);
   });
