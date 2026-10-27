@@ -112,6 +112,10 @@ describe("main", () => {
     expect((await run(["--help"])).stdout).toContain("config");
   });
 
+  test("--help lists the doctor command", async () => {
+    expect((await run(["--help"])).stdout).toMatch(/^\s+doctor\s/m);
+  });
+
   test("config with no subcommand prints its help and exits 0", async () => {
     const result = await run(["config"]);
     expect(result.code).toBe(0);

@@ -2,18 +2,20 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import * as promptAdapter from "../../../src/adapters/prompt/index.ts";
 import { git } from "../../helpers/git.ts";
 import { writeFile } from "../../helpers/isolate.ts";
-import { useProjectRepoEnv } from "../../helpers/project-repo.ts";
+import {
+  gitRefs,
+  snapshot,
+  useProjectRepoEnv,
+} from "../../helpers/project-repo.ts";
 
 const t = useProjectRepoEnv();
 const { env } = t;
@@ -53,27 +55,6 @@ interface Item {
 
 const itemsOf = (data: { checks: Item[] }, id: string) =>
   data.checks.filter((item) => item.id === id);
-
-/** Every file under `dir` with its text, skipping the inside of `.git` folders. */
-function snapshot(dir: string): Record<string, string> {
-  const files: Record<string, string> = {};
-  for (const name of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
-    if (/(^|[\\/])\.git([\\/]|$)/.test(name)) continue;
-    const path = join(dir, name);
-    files[name] = statSync(path).isDirectory()
-      ? "<dir>"
-      : readFileSync(path, "utf8");
-  }
-  return files;
-}
-
-function gitRefs(repo: string) {
-  const dir = join(env.codebase, repo);
-  return {
-    refs: git(dir, "for-each-ref"),
-    worktrees: git(dir, "worktree", "list", "--porcelain"),
-  };
-}
 
 describe("xr project doctor: the project", () => {
   test("a healthy project in its folder: the project path and 14 ok items, exit 0", async () => {
@@ -408,11 +389,11 @@ describe("xr project doctor: problems", () => {
     mkdirSync(join(env.login, "tmp"));
     rmSync(join(env.login, "AGENTS.md"));
     const files = snapshot(env.codebase);
-    const before = gitRefs("api");
+    const before = gitRefs(env.codebase, "api");
     const result = await t.run(DOCTOR, { cwd: env.login });
     expect(result.code).toBe(1);
     expect(snapshot(env.codebase)).toEqual(files);
-    expect(gitRefs("api")).toEqual(before);
+    expect(gitRefs(env.codebase, "api")).toEqual(before);
     expect(existsSync(env.lockFile)).toBe(false);
   });
 });

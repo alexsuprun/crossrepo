@@ -13,6 +13,7 @@ import { codebaseRepoAdd } from "../commands/codebase/repo/add.ts";
 import { codebaseRepoList } from "../commands/codebase/repo/list.ts";
 import { codebaseRepoRemove } from "../commands/codebase/repo/remove.ts";
 import { configShow } from "../commands/config/show.ts";
+import { xrDoctor } from "../commands/doctor/doctor.ts";
 import { projectCreate } from "../commands/project/create.ts";
 import { projectDoctor } from "../commands/project/doctor.ts";
 import { projectInfo } from "../commands/project/info.ts";
@@ -367,6 +368,15 @@ function createProgram({ write, help, select }: ProgramHooks): Command {
       outputError: () => {},
     })
     .action(() => help(program.helpInformation()));
+
+  program
+    .command("doctor")
+    .description(
+      "check the codebase or the project of this folder; print each problem with its fix",
+    )
+    .allowExcessArguments(false)
+    .helpOption("-h, --help", "print this help")
+    .action(() => select(xrDoctor));
 
   const config: Command = program
     .command("config")

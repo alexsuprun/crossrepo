@@ -9,7 +9,7 @@ description: Check one project and its codebase, and print each problem with its
 xr project doctor [<project>]
 ```
 
-It works in a codebase folder and in a project folder, also in a project folder whose record is broken. It has no options of its own, only the [global flags](../../output/#global-flags).
+It works in a codebase folder and in a project folder, also in a project folder whose record is broken. It has no options of its own, only the [global flags](../../output/#global-flags). [`xr doctor`](../doctor/) picks this doctor or the other one from the folder you are in.
 
 ## The project
 

@@ -9,7 +9,7 @@ description: Check the codebase config, the repo folders and AGENTS.md, and prin
 xr codebase doctor
 ```
 
-It works in a codebase folder and in a project folder. In a project folder it checks the codebase of the project record. It has no arguments and no options of its own, only the [global flags](../../output/#global-flags).
+It works in a codebase folder and in a project folder. In a project folder it checks the codebase of the project record. It has no arguments and no options of its own, only the [global flags](../../output/#global-flags). [`xr doctor`](../doctor/) picks this doctor or the other one from the folder you are in.
 
 ## What it does
 
