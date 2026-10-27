@@ -36,6 +36,7 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+          check-latest: true
       - run: bun install --frozen-lockfile
       - run: bun run validate
 
@@ -65,6 +66,7 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+          check-latest: true
       # Trusted Publishing needs npm 11.5.1 or newer.
       - name: Ensure npm 11.5.1 or newer
         run: |
@@ -131,6 +133,7 @@ jobs:
         with:
           node-version: "22.23"
           package-manager-cache: false
+          check-latest: true
       - name: Wait until npm serves the version
         run: |
           for _ in $(seq 1 30); do

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 const pkg = JSON.parse(
@@ -215,5 +215,35 @@ describe(".github/workflows/release.yml", () => {
       )
       .map(([name]) => name);
     expect(withIdToken).toEqual(["release"]);
+  });
+});
+
+// The runner cache can hold a Node patch that misses a security fix.
+describe(".github/workflows setup-node", () => {
+  const dir = new URL("../../.github/workflows/", import.meta.url);
+  const setups = readdirSync(dir)
+    .filter((file) => file.endsWith(".yml"))
+    .flatMap((file) => {
+      const workflow = parse(readFileSync(new URL(file, dir), "utf8"));
+      return Object.entries(workflow.jobs ?? {}).flatMap(([job, value]) =>
+        ((value as { steps?: { uses?: string; with?: unknown }[] }).steps ?? [])
+          .filter((step) => step.uses?.startsWith("actions/setup-node@"))
+          .map((step) => ({ where: `${file} ${job}`, with: step.with })),
+      );
+    });
+
+  test("there are setup-node steps", () => {
+    expect(setups.length).toBeGreaterThan(0);
+  });
+
+  test("each one sets check-latest: true", () => {
+    expect(
+      setups.filter(
+        (setup) =>
+          (setup.with as Record<string, unknown> | undefined)?.[
+            "check-latest"
+          ] !== true,
+      ),
+    ).toEqual([]);
   });
 });
