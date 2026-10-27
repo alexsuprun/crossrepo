@@ -63,6 +63,7 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+          check-latest: true
       - run: bun install --frozen-lockfile
         working-directory: docs
       - run: bun run build
@@ -86,6 +87,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
+          check-latest: true
       - run: node --version
       - run: bun install --frozen-lockfile
       - run: bun run test:smoke

@@ -32,6 +32,7 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+          check-latest: true
       - run: bun install --frozen-lockfile
         working-directory: docs
       - run: bun run build
