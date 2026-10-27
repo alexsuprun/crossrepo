@@ -1,10 +1,10 @@
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Ctx, FinalStep, Tx } from "../domain/ctx.ts";
 import { PROJECT_LIST_HINT } from "../domain/hints.ts";
-import { hookEnv, hookVars } from "../domain/project.ts";
+import { type HookName, hookEnv, hookVars } from "../domain/project.ts";
 import type { RepoItem } from "../domain/report.ts";
 import { GitError, XrError } from "../errors/index.ts";
-import { runHookSteps } from "./hooks.ts";
+import { hookWarning, runHookSteps } from "./hooks.ts";
 import { findProject, type ProjectEntry, pickProject } from "./projects.ts";
 
 /** The flags of `xr project remove`. */
@@ -52,9 +52,11 @@ export async function removeTarget(
 /**
  * The check phase and the delete phase of `xr project remove`, run inside a
  * transaction that holds the lock. The checks change nothing: no drift, no
- * uncommitted changes (unless `force`), `sh` found and `pre-remove` passed.
- * Then the `tx.finals` steps remove the worktrees, the branches with
- * `deleteBranch`, and the project folder last.
+ * uncommitted changes (unless `force`), `sh` found when `pre-remove` or
+ * `post-remove` is set, and `pre-remove` passed. Then the `tx.finals` steps
+ * remove the worktrees, the branches with `deleteBranch`, and the project
+ * folder last. Last, `post-remove` runs in the codebase folder; a failed or
+ * stopped line is a `hook-failed` warning, not an error.
  */
 export async function removeProject(
   ctx: Pick<
@@ -102,25 +104,26 @@ export async function removeProject(
       },
     );
   }
-  const preRemove = ctx.config.preRemove;
-  if (preRemove.length) ctx.hooks.findSh();
-  const env = hookEnv(
-    ctx.env,
-    ctx.config.vars,
-    hookVars({
-      codebasePath: codebase,
-      codebaseName: ctx.config.name ?? basename(codebase),
-      projectPath: projectDir,
-      projectName: project.name,
-      branch,
-      repos,
-      hook: "pre-remove",
-    }),
-    ctx.platform,
-  );
+  const { preRemove, postRemove } = ctx.config;
+  if (preRemove.length || postRemove.length) ctx.hooks.findSh();
+  const env = (hook: HookName) =>
+    hookEnv(
+      ctx.env,
+      ctx.config.vars,
+      hookVars({
+        codebasePath: codebase,
+        codebaseName: ctx.config.name ?? basename(codebase),
+        projectPath: projectDir,
+        projectName: project.name,
+        branch,
+        repos,
+        hook,
+      }),
+      ctx.platform,
+    );
   await runHookSteps(ctx, tx, "pre-remove", preRemove, {
     cwd: projectDir,
-    env,
+    env: env("pre-remove"),
     cleanup: (command) => ({
       what: "pre-remove hook",
       path: projectDir,
@@ -154,6 +157,7 @@ export async function removeProject(
       },
     },
   ]);
+  await runPostRemove(ctx, tx, postRemove, codebase, env("post-remove"));
 
   return {
     projectDir,
@@ -163,6 +167,38 @@ export async function removeProject(
       removedRepoItem(repo, missing.has(repo), branchResults.get(repo)),
     ),
   };
+}
+
+/**
+ * The `post-remove` lines, one at a time, after the delete phase. The first
+ * failed line, or a Ctrl-C, ends the hook with a `hook-failed` warning: the
+ * project is gone, so nothing can be undone and the remove still succeeds.
+ */
+async function runPostRemove(
+  ctx: Pick<Ctx, "hooks" | "out">,
+  tx: Tx,
+  lines: readonly string[],
+  codebase: string,
+  env: Readonly<Record<string, string>>,
+): Promise<void> {
+  for (const [index, command] of lines.entries()) {
+    try {
+      await runHookSteps(ctx, tx, "post-remove", [command], {
+        cwd: codebase,
+        env,
+        cleanup: (line) => ({
+          what: "post-remove hook",
+          path: codebase,
+          command: `Undo by hand what \`${line}\` did, if anything.`,
+        }),
+      });
+    } catch (error) {
+      const warning = hookWarning("post-remove", error, lines.slice(index));
+      if (!warning) throw error;
+      ctx.out.emit({ type: "warning", warning });
+      return;
+    }
+  }
 }
 
 /**

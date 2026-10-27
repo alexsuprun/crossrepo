@@ -1,10 +1,7 @@
 import type { Ctx, HookResult, Leftover, Tx } from "../domain/ctx.ts";
-import { hookStepLabel, lastLines } from "../domain/project.ts";
-import type { Block } from "../domain/report.ts";
+import { type HookName, hookStepLabel, lastLines } from "../domain/project.ts";
+import type { Block, Warning } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
-
-/** The project hooks of the config. */
-export type HookName = "post-create" | "pre-remove";
 
 const HOOK_OUTPUT_LINES = 20;
 
@@ -69,4 +66,60 @@ export function hookFailed(
     details: { command, exitCode: result.exitCode, timedOut: result.timedOut },
     blocks,
   });
+}
+
+/**
+ * The `hook-failed` warning of a `post-remove` that did not end well, after the
+ * project is removed: `error` is the `hook-failed` of a line, or the
+ * `interrupted` of a Ctrl-C, whose cause is the `hook-failed` of the stopped
+ * line when one ran. `notRun` starts with the line that failed or would run
+ * next. Gives `undefined` for any other error.
+ */
+export function hookWarning(
+  hook: HookName,
+  error: unknown,
+  notRun: readonly string[],
+): Warning | undefined {
+  if (!(error instanceof XrError)) return undefined;
+  const names = notRun.map((command) => `\`${command}\``).join(", ");
+  if (error.code === "hook-failed") {
+    return {
+      code: "hook-failed",
+      message: error.message,
+      hint: `The project is removed. Fix the line in \`project.${hook}\`, then run by hand the lines that did not run: ${names}.`,
+      ...outputLines(error),
+    };
+  }
+  if (error.code !== "interrupted") return undefined;
+  const { cause } = error;
+  return {
+    code: "hook-failed",
+    message:
+      cause === undefined
+        ? `The ${hook} hook was stopped by Ctrl-C before ${names} ran.`
+        : `The ${hook} hook \`${notRun[0]}\` was stopped by Ctrl-C.`,
+    hint: `The project is removed. Run by hand the lines that did not run, if they are needed: ${names}.`,
+    ...(cause instanceof XrError && cause.code === "hook-failed"
+      ? outputLines(cause)
+      : {}),
+  };
+}
+
+/** `{ lines }` from the `hookOutput` block of a `hookFailed` error; empty when the line printed nothing. */
+function outputLines(error: XrError): { lines?: string[] } {
+  const lines = hookOutputLines(error);
+  return lines.length ? { lines } : {};
+}
+
+/** The output lines in the `hookOutput` block of a `hookFailed` error. */
+function hookOutputLines(error: XrError): string[] {
+  for (const block of (error.blocks ?? []) as Block[]) {
+    if (block.type !== "section" || block.key !== "hookOutput") continue;
+    for (const inner of block.blocks) {
+      if (inner.type === "value" && typeof inner.value === "string") {
+        return inner.value === "" ? [] : inner.value.split("\n");
+      }
+    }
+  }
+  return [];
 }

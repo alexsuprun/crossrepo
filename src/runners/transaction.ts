@@ -15,7 +15,12 @@ export type RunnerEvent =
   | { type: "step-end"; text: string; ok: boolean }
   | {
       type: "warning";
-      warning: { code: string; message: string; hint?: string };
+      warning: {
+        code: string;
+        message: string;
+        hint?: string;
+        lines?: string[];
+      };
     };
 
 /** A Ctrl-C source. `on` gives the function that stops listening. */
@@ -61,7 +66,9 @@ export interface Tx {
    * The delete phase of a remove (AD-17): steps with no undo, never aborted, run
    * in order. When a step
    * fails, or Ctrl-C stops the phase after a step, that step (when it failed)
-   * and every step not run are leftovers.
+   * and every step not run are leftovers. Once the phase is done, the steps
+   * before it are not undone, and a Ctrl-C after it does not make a body that
+   * returns fail.
    */
   finals(steps: readonly FinalStep[]): Promise<void>;
 }
@@ -93,6 +100,8 @@ export async function transaction<T>(
   let inFlight: Leftover | undefined;
   /** The final steps not started yet, once a `finals` phase has started. */
   let queued: Leftover[] = [];
+  /** A `finals` phase ran to the end: nothing before it can be undone. */
+  let finalsDone = false;
   let stepsDone = 0;
   let lock: LockHandle | undefined;
   let lockedAt = 0;
@@ -151,7 +160,7 @@ export async function transaction<T>(
     } catch (error) {
       ctx.out.emit({ type: "step-end", text: label, ok: false });
       leftovers.push(...onFailure);
-      throw ctrlC.count > 0 ? interrupted() : error;
+      throw ctrlC.count > 0 ? interrupted(error) : error;
     } finally {
       inFlight = undefined;
     }
@@ -200,6 +209,8 @@ export async function transaction<T>(
         await afterStep();
       }
       queued = [];
+      undos.length = 0;
+      finalsDone = true;
     },
   };
 
@@ -223,8 +234,9 @@ export async function transaction<T>(
     try {
       if (lockAt === "start") takeLock();
       const result = await body(tx);
-      // With nothing to undo, a Ctrl-C during the last step changes nothing more.
-      if (ctrlC.count > 0 && undos.length > 0) throw interrupted();
+      // With nothing to undo, or after a done delete phase, a late Ctrl-C changes nothing more.
+      if (ctrlC.count > 0 && undos.length > 0 && !finalsDone)
+        throw interrupted();
       return result;
     } catch (error) {
       throw await undoAll(error);

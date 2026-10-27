@@ -45,6 +45,13 @@ export function hookEnv(
   return env;
 }
 
+/** The project hooks of the config: `pre-` hooks check, `post-` hooks do the work. */
+export type HookName =
+  | "pre-create"
+  | "post-create"
+  | "pre-remove"
+  | "post-remove";
+
 /** What the built-in `CROSSREPO_*` vars of a hook are made from. */
 export interface HookVarsInput {
   codebasePath: string;
@@ -54,7 +61,7 @@ export interface HookVarsInput {
   branch: string;
   /** In record order. */
   repos: readonly string[];
-  hook: "post-create" | "pre-remove";
+  hook: HookName;
 }
 
 /** The 7 built-in vars of a hook line. */

@@ -21,6 +21,9 @@ const HEADER =
 
 const HOOK_EXAMPLES = [
   "# project:",
+  "#   pre-create:",
+  "#     # Stop the create before it makes anything when a tool is missing.",
+  `#     - command -v node >/dev/null || { echo "node is not installed"; exit 1; }`,
   "#   post-create:",
   "#     # Copy untracked files, such as .env, into each new worktree.",
   "#     - |",
@@ -35,6 +38,9 @@ const HOOK_EXAMPLES = [
   `#           echo "$repo has unpushed commits"; exit 1`,
   "#         fi",
   "#       done",
+  "#   post-remove:",
+  "#     # Clean up outside the project folder after it is removed, such as a tmux session with the name of the project.",
+  `#     - tmux kill-session -t "$CROSSREPO_PROJECT_NAME" 2>/dev/null || true`,
 ];
 
 /** The text of a new `.crossrepo/config.yaml`, with repos in the given order. */

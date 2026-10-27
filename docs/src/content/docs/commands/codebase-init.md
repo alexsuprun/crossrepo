@@ -36,7 +36,7 @@ Ctrl-C during steps 3 to 5 undoes the steps that are done: `.crossrepo/` is dele
 
 ## The config
 
-Each repo gets its `remote`, its `default-branch` and an empty `description`. The file also has two hook examples that are commented out: one copies untracked files such as `.env` into each new worktree, and one stops a remove when a worktree has commits that are not pushed.
+Each repo gets its `remote`, its `default-branch` and an empty `description`. The file also has 4 hook examples that are commented out, one for each hook: `pre-create` stops the create when a tool is missing, `post-create` copies untracked files such as `.env` into each new worktree, `pre-remove` stops a remove when a worktree has commits that are not pushed, and `post-remove` cleans up what `post-create` started outside the project folder. See the [hooks guide](../../guides/hooks/).
 
 ```yaml
 # crossrepo codebase config. Docs: https://alexsuprun.github.io/crossrepo/
@@ -47,8 +47,26 @@ repos:
     description: ""
 
 # project:
+#   pre-create:
+#     # Stop the create before it makes anything when a tool is missing.
+#     - command -v node >/dev/null || { echo "node is not installed"; exit 1; }
 #   post-create:
-#     ...
+#     # Copy untracked files, such as .env, into each new worktree.
+#     - |
+#       printf '%s\n' "$CROSSREPO_PROJECT_REPOS" | while read -r repo; do
+#         cp "$CROSSREPO_CODEBASE_PATH/$repo/.env" "$CROSSREPO_PROJECT_PATH/$repo/" 2>/dev/null || true
+#       done
+#   pre-remove:
+#     # Stop the remove when a worktree has commits that are not pushed.
+#     - |
+#       printf '%s\n' "$CROSSREPO_PROJECT_REPOS" | while read -r repo; do
+#         if [ -n "$(git -C "$CROSSREPO_PROJECT_PATH/$repo" log '@{upstream}..' --oneline)" ]; then
+#           echo "$repo has unpushed commits"; exit 1
+#         fi
+#       done
+#   post-remove:
+#     # Clean up outside the project folder after it is removed, such as a tmux session with the name of the project.
+#     - tmux kill-session -t "$CROSSREPO_PROJECT_NAME" 2>/dev/null || true
 ```
 
 With no repos, the config has `repos: {}`. Add repos later with `xr codebase repo add <url>|<folder>`.

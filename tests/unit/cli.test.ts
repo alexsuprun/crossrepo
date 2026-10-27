@@ -565,8 +565,10 @@ describe("configView", () => {
       entries: [],
       projectsDir: base.projectsDir,
       repos: [],
+      preCreate: [],
       postCreate: [],
       preRemove: [],
+      postRemove: [],
       vars: {},
       unknownKeys: [],
     });
@@ -585,21 +587,25 @@ describe("configView", () => {
     ).toEqual(unknownKeys);
   });
 
-  test("gives the codebase name, the post-create lines and the vars", () => {
+  test("gives the codebase name, the 4 hook lists and the vars", () => {
     const view = configView({
       ...base,
       values: {
         name: "shop",
         project: {
+          "pre-create": ["p"],
           "post-create": ["a", "b"],
           "pre-remove": ["c"],
+          "post-remove": ["d", "e"],
           vars: { PORT: "5432" },
         },
       },
     });
     expect(view.name).toBe("shop");
     expect(view.postCreate).toEqual(["a", "b"]);
+    expect(view.preCreate).toEqual(["p"]);
     expect(view.preRemove).toEqual(["c"]);
+    expect(view.postRemove).toEqual(["d", "e"]);
     expect(view.vars).toEqual({ PORT: "5432" });
   });
 });

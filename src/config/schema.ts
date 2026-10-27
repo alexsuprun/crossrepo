@@ -10,8 +10,10 @@ const varValue = z
 
 const repoShape = { remote: text, "default-branch": text, description: text };
 const projectShape = {
+  "pre-create": list,
   "post-create": list,
   "pre-remove": list,
+  "post-remove": list,
   vars: z.record(z.string(), varValue).nullish(),
 };
 const rootShape = { name: text, "projects-dir": z.string().min(1).nullish() };
@@ -46,8 +48,10 @@ export interface ConfigValues {
     { remote?: string; "default-branch"?: string; description?: string }
   >;
   project?: {
+    "pre-create"?: string[];
     "post-create"?: string[];
     "pre-remove"?: string[];
+    "post-remove"?: string[];
     vars?: Record<string, string>;
   };
 }

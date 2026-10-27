@@ -116,6 +116,8 @@ export interface Warning {
   code: string;
   message: string;
   hint?: string;
+  /** Output lines to show under the hint, such as the end of a hook's output. */
+  lines?: string[];
 }
 
 export type LiveEvent =

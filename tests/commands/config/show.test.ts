@@ -84,6 +84,36 @@ describe("xr config show in a codebase", () => {
     });
   });
 
+  test("the 4 hook lists show with their source, and a later level replaces a whole list", async () => {
+    const localFile = join(codebase, ".crossrepo", "config.local.yaml");
+    writeFile(
+      userFile,
+      "project:\n  pre-create: [user-a, user-b]\n  post-remove: [user-c]\n",
+    );
+    writeFile(
+      codebaseFile,
+      "project:\n  post-create: [b]\n  pre-remove: [c]\n  post-remove: [d, e]\n",
+    );
+    writeFile(localFile, "project:\n  pre-create: [local]\n");
+    const result = await json(["config", "show"]);
+    expect(result.code).toBe(0);
+    expect(
+      result.data.entries.filter(({ key }: { key: string }) =>
+        key.startsWith("project."),
+      ),
+    ).toEqual([
+      { key: "project.pre-create", value: ["local"], source: localFile },
+      { key: "project.post-create", value: ["b"], source: codebaseFile },
+      { key: "project.pre-remove", value: ["c"], source: codebaseFile },
+      { key: "project.post-remove", value: ["d", "e"], source: codebaseFile },
+    ]);
+    const text = await run(["config", "show"]);
+    expect(text.stdout).toContain("project.pre-create ");
+    expect(text.stdout).toContain("project.post-remove ");
+    expect(text.stdout).toContain("  local\n");
+    expect(text.stdout).not.toContain("user-a");
+  });
+
   test("the default projects-dir has the source default", async () => {
     writeFile(codebaseFile, "");
     expect((await json(["config", "show"])).data.entries).toEqual([

@@ -299,8 +299,10 @@ export function configView({
       description: repo.description,
     })),
     ...(values.name === undefined ? {} : { name: values.name }),
+    preCreate: values.project?.["pre-create"] ?? [],
     postCreate: values.project?.["post-create"] ?? [],
     preRemove: values.project?.["pre-remove"] ?? [],
+    postRemove: values.project?.["post-remove"] ?? [],
     vars: values.project?.vars ?? {},
     unknownKeys,
   };

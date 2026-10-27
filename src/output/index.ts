@@ -44,6 +44,8 @@ export interface Warning {
   code: string;
   message: string;
   hint?: string;
+  /** Output lines to show under the hint, such as the end of a hook's output. */
+  lines?: string[];
 }
 
 /**
@@ -289,6 +291,8 @@ export function createOutput({
           line(`${paint("warn", SYMBOL.warning)} ${event.warning.message}`);
           if (event.warning.hint)
             line(paint("muted", `  ${event.warning.hint}`));
+          for (const text of event.warning.lines ?? [])
+            line(paint("muted", `    ${text}`));
           break;
       }
     },

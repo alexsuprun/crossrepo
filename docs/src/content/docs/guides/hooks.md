@@ -1,27 +1,37 @@
 ---
 title: Hooks
-description: Run your own shell commands after a project is created and before it is removed.
+description: Run your own shell commands before and after a project is created or removed.
 ---
 
-Hooks are your own shell commands that `xr` runs for a project. Use them to copy `.env` files, install dependencies, or stop a remove that would lose work. crossrepo has no built-in actions: each thing a hook does is a line that you write.
+Hooks are your own shell commands that `xr` runs for a project. Use them to check that a tool is installed, copy `.env` files, install dependencies, stop a remove that would lose work, or clean up after a remove. crossrepo has no built-in actions: each thing a hook does is a line that you write.
 
-## The two hooks
+## The four hooks
 
-Both hooks are lists under `project:` in the config, at any [config level](../config/#three-levels).
+crossrepo has 4 hooks. All are lists under `project:` in the config, at any [config level](../config/#three-levels). The rule is: `pre-` hooks check, `post-` hooks do the work. A `pre-` hook runs before the command makes or removes anything, so a failed line stops the command and nothing is made or removed. A `post-` hook runs when the main work is done.
 
-| Hook | Runs | When a line fails |
-| --- | --- | --- |
-| `project.post-create` | At the end of [xr project create](../../commands/project-create/), after the worktrees, the project record and `AGENTS.md` are written. | The create is undone. See [When a hook fails](#when-a-hook-fails). |
-| `project.pre-remove` | In [xr project remove](../../commands/project-remove/), after its checks and before anything is deleted. | The remove stops, and the project stays as it is. |
+| Hook | Runs | Folder | When a line fails |
+| --- | --- | --- | --- |
+| `project.pre-create` | In [xr project create](../../commands/project-create/), after its checks and before it makes the project folder. | The codebase folder | The create stops, and nothing is made. |
+| `project.post-create` | At the end of [xr project create](../../commands/project-create/), after the worktrees, the project record and `AGENTS.md` are written. | The project folder | The create is undone. See [When a hook fails](#when-a-hook-fails). |
+| `project.pre-remove` | In [xr project remove](../../commands/project-remove/), after its checks and before anything is deleted. | The project folder | The remove stops, and the project stays as it is. |
+| `project.post-remove` | At the end of [xr project remove](../../commands/project-remove/), after the worktrees, the branches (with `--delete-branch`) and the project folder are removed. | The codebase folder | A warning. The remove still succeeds, with exit code 0. |
 
 ```yaml
 project:
+  pre-create:
+    - command -v npm >/dev/null || { echo "npm is not installed"; exit 1; }
   post-create:
     - npm --prefix api ci
     - cp "$CROSSREPO_CODEBASE_PATH/web/.env" web/
   pre-remove:
     - echo "Removing $CROSSREPO_PROJECT_NAME"
+  post-remove:
+    - tmux kill-session -t "$CROSSREPO_PROJECT_NAME" 2>/dev/null || true
 ```
+
+Use `pre-create` to check tools or names before `xr` makes anything. Use `post-remove` for cleanup that could stop the remove if it ran in `pre-remove`, for example to close the terminal or the cmux workspace that runs `xr`.
+
+Only `xr project create` and `xr project remove` run hooks. `xr project repo add`, `xr project repo remove`, `xr project sync` and `xr codebase repo remove` run none.
 
 A list in a later config level replaces the whole list of an earlier level. So `post-create: []` in your `config.local.yaml` turns the codebase hook off on your machine. Run [xr config show](../../commands/config-show/) to see the hook lines that `xr` will run and the file that gives them.
 
@@ -31,7 +41,7 @@ A list in a later config level replaces the whole list of an earlier level. So `
 - Each line runs with `sh -c`: `/bin/sh` on macOS, Linux and WSL, and the `sh.exe` of [Git for Windows](https://gitforwindows.org) on native Windows.
 - The lines run one at a time, in list order. The first line that fails stops the hook, and the lines after it do not run.
 - A hook runs once per project, not once per repo. To do something in each repo, loop over `$CROSSREPO_PROJECT_REPOS`.
-- The current folder is the project folder, such as `~/work/acme/.projects/feat--login`.
+- The current folder is the project folder, such as `~/work/acme/.projects/feat--login`, for `post-create` and `pre-remove`. For `pre-create` and `post-remove`, the project folder does not exist, so the current folder is the codebase folder, such as `~/work/acme`.
 - stdin is closed, so a line cannot ask questions.
 - The output of each line, stdout and stderr, goes to the stderr of `xr`. This is also true with `--json`, so stdout keeps one JSON object.
 - Each line can run for 10 minutes. After that, `xr` stops the line and every process it started, and the line fails.
@@ -39,7 +49,7 @@ A list in a later config level replaces the whole list of an earlier level. So `
 
 Each line prints a step line such as `✓ post-create: npm --prefix api ci`, with the first text line of the command, cut at 60 characters.
 
-On native Windows, when a hook has lines and `xr` finds no `sh.exe`, the command fails with `sh-not-found` before it changes anything.
+`xr` looks for `sh` before it changes anything: `xr project create` when `pre-create` or `post-create` has lines, and `xr project remove` when `pre-remove` or `post-remove` has lines. On native Windows with no `sh.exe`, the command then fails with `sh-not-found`, and nothing changes.
 
 ## Built-in variables
 
@@ -49,13 +59,13 @@ Each line gets your environment plus these 7 variables:
 | --- | --- |
 | `CROSSREPO_CODEBASE_PATH` | The codebase folder. |
 | `CROSSREPO_CODEBASE_NAME` | The `name` from the config, else the codebase folder name. |
-| `CROSSREPO_PROJECT_PATH` | The project folder. |
+| `CROSSREPO_PROJECT_PATH` | The project folder. In `pre-create` it is the folder that `xr` will make, and it does not exist yet. In `post-remove` it is the folder that was just removed. |
 | `CROSSREPO_PROJECT_NAME` | The project folder name, such as `feat--login`. |
 | `CROSSREPO_PROJECT_BRANCH` | The branch, such as `feat/login`. |
 | `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line. |
-| `CROSSREPO_HOOK` | The hook that runs: `post-create` or `pre-remove`. |
+| `CROSSREPO_HOOK` | The hook that runs: `pre-create`, `post-create`, `pre-remove` or `post-remove`. |
 
-The folder of a repo in the codebase is `$CROSSREPO_CODEBASE_PATH/<repo>`, and its worktree is `$CROSSREPO_PROJECT_PATH/<repo>`.
+The folder of a repo in the codebase is `$CROSSREPO_CODEBASE_PATH/<repo>`, and its worktree is `$CROSSREPO_PROJECT_PATH/<repo>`. In `pre-create` and `post-remove`, the worktrees do not exist.
 
 ## Your own variables
 
@@ -80,7 +90,7 @@ project:
 
 ## When a hook fails
 
-A line fails when it exits with a code that is not 0, when a signal stops it, or when it runs for more than 10 minutes. Then `xr` fails with `hook-failed` and exit code 1. The error has the line, its exit code, and the last 20 lines of its output.
+A line fails when it exits with a code that is not 0, when a signal stops it, or when it runs for more than 10 minutes. The lines after it do not run. For `pre-create`, `post-create` and `pre-remove`, `xr` then fails with `hook-failed` and exit code 1. The error has the line, its exit code, and the last 20 lines of its output.
 
 ```text
 post-create: cp "$CROSSREPO_CODEBASE_PATH/web/.env" web/…
@@ -95,13 +105,33 @@ Hook output
 
 With `--json`, `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`. See [Output and errors](../../output/).
 
-**post-create.** `xr` undoes the create: it removes the worktrees and the project folder, and deletes each branch that this create made new. A branch that existed before stays. `xr` does not undo what the hook lines did, for example a file written or a database made outside the project folder. `pre-remove` does not run during this undo.
+**pre-create.** The create stops before it makes anything. No folder, worktree, branch or record is made. When a create check fails first, for example with `project-exists`, `pre-create` does not run.
+
+**post-create.** `xr` undoes the create: it removes the worktrees and the project folder, and deletes each branch that this create made new. A branch that existed before stays. `xr` does not undo what the hook lines did, for example a file written or a database made outside the project folder. Undo never runs a hook, so `pre-remove` and `post-remove` do not run during this undo.
 
 **pre-remove.** The remove stops before anything is deleted. The worktrees, the project folder and the branches stay. `--force` does not skip `pre-remove`: it skips only the check for uncommitted changes. Fix the line or the problem it found, then run `xr project remove` again.
 
+**post-remove.** The project is already gone, so nothing can be undone. A failed line does not fail the command: the exit code is 0, and stderr gets a warning with the hint and the last 20 lines of the output:
+
+```text
+! The post-remove hook `tmux kill-session -t "$CROSSREPO_PROJECT_NAME"` failed with exit code 1.
+  The project is removed. Fix the line in `project.post-remove`, then run by hand the lines that did not run: `tmux kill-session -t "$CROSSREPO_PROJECT_NAME"`.
+    can't find session: feat--login
+```
+
+With `--json`, the same warning is in `warnings`, with `code` `hook-failed`, `message`, `hint`, and `lines`, the last 20 lines of the output when the line printed any. The hint names the failed line and every line after it, so you can run them by hand. Ctrl-C during `post-remove` works the same way: the running line stops, the lines after it do not run, and the command prints the `hook-failed` warning and exits with code 0. Its message is "The post-remove hook `<line>` was stopped by Ctrl-C.", and its hint is "The project is removed. Run by hand the lines that did not run, if they are needed:" with the same list of lines. A second Ctrl-C stops `xr` at once. When a remove step fails, or `pre-remove` fails, `post-remove` does not run.
+
 ## Examples
 
-These two examples are based on the commented-out examples in the config that `xr codebase init` writes.
+These examples are based on the commented-out examples in the config that `xr codebase init` writes.
+
+Stop the create before it changes anything when a tool is missing:
+
+```yaml
+project:
+  pre-create:
+    - command -v node >/dev/null || { echo "node is not installed"; exit 1; }
+```
 
 Copy untracked files, such as `.env`, from each repo into its new worktree:
 
@@ -129,6 +159,14 @@ project:
           echo "$repo has unpushed commits"; exit 1
         fi
       done
+```
+
+Clean up outside the project folder after it is removed, such as a tmux session with the name of the project:
+
+```yaml
+project:
+  post-remove:
+    - tmux kill-session -t "$CROSSREPO_PROJECT_NAME" 2>/dev/null || true
 ```
 
 ## Security

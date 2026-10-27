@@ -690,6 +690,58 @@ describe("tx.finals", () => {
     expect(log.slice(1)).toEqual(["x", "y", "z", "release"]);
   });
 
+  test("Ctrl-C in a step after a done finals phase: no undo, the body result is given", async () => {
+    const { ctx, log, interrupts } = recorder();
+    const result = await transaction(ctx, async (tx) => {
+      await tx.step(
+        "Make a",
+        () => log.push("a"),
+        () => void log.push("undo a"),
+        cleanup("a"),
+      );
+      await tx.finals(steps(log));
+      await tx.step(
+        "Clean up",
+        () => {
+          interrupts.fire();
+          log.push("clean");
+        },
+        () => void log.push("undo clean"),
+        cleanup("clean"),
+      );
+      return "done";
+    });
+    expect(result).toBe("done");
+    expect(log.slice(1)).toEqual(["a", "x", "y", "z", "clean", "release"]);
+  });
+
+  test("a step stopped by Ctrl-C after a done finals phase: the body can catch interrupted and end", async () => {
+    const { ctx, log, interrupts } = recorder();
+    const result = await transaction(ctx, async (tx) => {
+      await tx.step(
+        "Make a",
+        () => log.push("a"),
+        () => void log.push("undo a"),
+        cleanup("a"),
+      );
+      await tx.finals(steps(log));
+      const error = await tx
+        .step(
+          "Clean up",
+          () => {
+            interrupts.fire();
+            throw new Error("line stopped");
+          },
+          () => {},
+          cleanup("clean"),
+        )
+        .catch((thrown: unknown) => thrown as XrError);
+      return `${error.code}: ${(error.cause as Error).message}`;
+    });
+    expect(result).toBe("interrupted: line stopped");
+    expect(log.slice(1)).toEqual(["a", "x", "y", "z", "release"]);
+  });
+
   test("lock after-first-step counts a step", async () => {
     const { ctx, log } = recorder();
     await transaction(ctx, (tx) => tx.finals(steps(log)), {

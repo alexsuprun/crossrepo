@@ -166,6 +166,21 @@ function postCreate(lines: string[], vars = "") {
   );
 }
 
+/** Puts hook lists, such as `{ "pre-create": [...] }`, and optional vars YAML in the codebase config. */
+function hooks(lists: Record<string, string[]>, vars = "") {
+  writeConfig(
+    [
+      "project:",
+      ...Object.entries(lists).flatMap(([name, lines]) => [
+        `  ${name}:`,
+        ...lines.map((line) => `    - ${JSON.stringify(line)}`),
+      ]),
+      vars,
+      "",
+    ].join("\n"),
+  );
+}
+
 describe("xr project create: success", () => {
   test("--all --json: one JSON object, the folder layout, the record and the worktrees", async () => {
     const result = await json([...CREATE, "feat/x", "--all"]);
@@ -729,6 +744,94 @@ describe("xr project create: post-create", () => {
     expect(
       readFileSync(join(projects, "feat--x", "name.txt"), "utf8").trim(),
     ).toBe("Shop");
+  });
+});
+
+describe("xr project create: pre-create", () => {
+  test("runs each line in the codebase folder with CROSSREPO_HOOK=pre-create, before the project folder exists", async () => {
+    const out = join(iso.root, "pre.txt");
+    hooks(
+      {
+        "pre-create": [
+          `{ basename "$PWD"; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_PATH"; echo "$CROSSREPO_PROJECT_REPOS"; echo "$PORT"; if [ -e "$CROSSREPO_PROJECT_PATH" ]; then echo exists; else echo absent; fi; } > "${out}"`,
+          `echo second >> "${out}"`,
+        ],
+      },
+      "  vars:\n    PORT: 5432",
+    );
+    const result = await json([...CREATE, "feat/x", "--all"]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(out, "utf8").trim().split(/\r?\n/)).toEqual([
+      "shop",
+      "pre-create",
+      join(projects, "feat--x"),
+      "api",
+      "web",
+      "5432",
+      "absent",
+      "second",
+    ]);
+    expect(result.stderr).toContain("pre-create: {");
+    expect(existsSync(join(projects, "feat--x", "api"))).toBe(true);
+  });
+
+  test("a failing line: hook-failed, the lines after it do not run, nothing is made", async () => {
+    const never = join(iso.root, "never.txt");
+    hooks({ "pre-create": ["echo before; exit 1", `touch "${never}"`] });
+    const before = state();
+    const result = await json([...CREATE, "feat/x", "--all"]);
+    expect(result.code).toBe(1);
+    const { error } = result.data;
+    expect(error.code).toBe("hook-failed");
+    expect(error.message).toBe(
+      "The pre-create hook `echo before; exit 1` failed with exit code 1.",
+    );
+    expect(error.hint).toContain("project.pre-create");
+    expect(error.details.hookOutput.lines).toBe("before");
+    expect(existsSync(never)).toBe(false);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("a failed create check: the hook does not run", async () => {
+    const marker = join(iso.root, "ran.txt");
+    hooks({ "pre-create": [`touch "${marker}"`] });
+    mkdirSync(join(projects, "feat--x"), { recursive: true });
+    const result = await json([...CREATE, "feat/x", "--all"]);
+    expect(result.data.error.code).toBe("project-exists");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("a failed post-create undoes the create and does not run post-remove", async () => {
+    const pre = join(iso.root, "pre.txt");
+    const post = join(iso.root, "post-remove.txt");
+    hooks({
+      "pre-create": [`touch "${pre}"`],
+      "post-create": ["exit 1"],
+      "post-remove": [`touch "${post}"`],
+    });
+    const before = state();
+    const result = await json([...CREATE, "feat/x", "api"]);
+    expect(result.data.error.code).toBe("hook-failed");
+    expect(result.data.error.message).toContain("post-create");
+    expect(existsSync(pre)).toBe(true);
+    expect(existsSync(post)).toBe(false);
+    expect(state()).toEqual(before);
+  });
+
+  test("no sh with only pre-create set: sh-not-found, nothing changes", async () => {
+    hooks({ "pre-create": ["true"] });
+    const real = hooksAdapter.createHooks;
+    spies.push(
+      spyOn(hooksAdapter, "createHooks").mockImplementation((options) =>
+        real({ ...options, platform: "win32", exists: () => false }),
+      ),
+    );
+    const before = state();
+    const result = await json([...CREATE, "feat/x", "api"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("sh-not-found");
+    expect(state()).toEqual(before);
   });
 });
 

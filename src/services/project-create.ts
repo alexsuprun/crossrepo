@@ -4,6 +4,7 @@ import { LIST_HINT } from "../domain/hints.ts";
 import {
   badBranchChars,
   branchSlug,
+  type HookName,
   hookEnv,
   hookVars,
   isoSeconds,
@@ -130,8 +131,9 @@ export function checkReposOnDisk(states: readonly RepoState[]): void {
  * The checks and steps of `xr project create`, run inside a transaction that
  * holds the lock. The checks change nothing: the project folder is free, each
  * repo fetches, has a default branch and does not have the branch checked
- * out, and `sh` is found when `post-create` is set. Then the steps make the
- * folder, the worktrees, the record, `AGENTS.md`, and run `post-create`.
+ * out, `sh` is found when `pre-create` or `post-create` is set, and
+ * `pre-create` passes in the codebase folder. Then the steps make the folder,
+ * the worktrees, the record, `AGENTS.md`, and run `post-create`.
  */
 export async function createProject(
   ctx: Pick<
@@ -163,8 +165,8 @@ export async function createProject(
     branch,
     repos,
   );
-  const postCreate = ctx.config.postCreate;
-  if (postCreate.length) ctx.hooks.findSh();
+  const { preCreate, postCreate } = ctx.config;
+  if (preCreate.length || postCreate.length) ctx.hooks.findSh();
   const choices = await chooseBranches(
     ctx,
     signal,
@@ -173,6 +175,30 @@ export async function createProject(
     repos,
     defaults,
   );
+  const env = (hook: HookName) =>
+    hookEnv(
+      ctx.env,
+      ctx.config.vars,
+      hookVars({
+        codebasePath: codebase,
+        codebaseName: ctx.config.name ?? basename(codebase),
+        projectPath: projectDir,
+        projectName: slug,
+        branch,
+        repos,
+        hook,
+      }),
+      ctx.platform,
+    );
+  await runHookSteps(ctx, tx, "pre-create", preCreate, {
+    cwd: codebase,
+    env: env("pre-create"),
+    cleanup: (command) => ({
+      what: "pre-create hook",
+      path: codebase,
+      command: `Undo by hand what \`${command}\` did, if anything.`,
+    }),
+  });
 
   await makeProjectFolderStep(fs, tx, projectDir);
   for (const repo of repos) {
@@ -205,23 +231,9 @@ export async function createProject(
     `rm "${agents}"`,
   );
 
-  const env = hookEnv(
-    ctx.env,
-    ctx.config.vars,
-    hookVars({
-      codebasePath: codebase,
-      codebaseName: ctx.config.name ?? basename(codebase),
-      projectPath: projectDir,
-      projectName: slug,
-      branch,
-      repos,
-      hook: "post-create",
-    }),
-    ctx.platform,
-  );
   await runHookSteps(ctx, tx, "post-create", postCreate, {
     cwd: projectDir,
-    env,
+    env: env("post-create"),
     cleanup: (command) => ({
       what: "post-create hook",
       path: projectDir,

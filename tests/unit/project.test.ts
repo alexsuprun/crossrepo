@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   badBranchChars,
   branchSlug,
+  type HookName,
   hookEnv,
   hookStepLabel,
   hookVars,
@@ -67,6 +68,28 @@ describe("hookEnv", () => {
 });
 
 describe("hookVars", () => {
+  test("CROSSREPO_HOOK is any of the 4 hook names", () => {
+    const hooks: HookName[] = [
+      "pre-create",
+      "post-create",
+      "pre-remove",
+      "post-remove",
+    ];
+    for (const hook of hooks) {
+      expect(
+        hookVars({
+          codebasePath: "/c",
+          codebaseName: "shop",
+          projectPath: "/c/.projects/x",
+          projectName: "x",
+          branch: "x",
+          repos: [],
+          hook,
+        }).CROSSREPO_HOOK,
+      ).toBe(hook);
+    }
+  });
+
   test("gives the 7 built-in vars, repos one per line in order", () => {
     expect(
       hookVars({
