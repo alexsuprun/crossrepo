@@ -822,6 +822,38 @@ describe("checks block", () => {
     expect(written.stdout).toContain(paint("dim", "        repos:"));
   });
 
+  test("a skipped item shows a muted – with its message and no fix, in text and JSON", () => {
+    const skipped: Block = {
+      type: "checks",
+      items: [
+        {
+          id: "codebase-path",
+          status: "skipped",
+          message: "project record cannot be read",
+        },
+      ],
+    };
+    const plain = capture("plain");
+    plain.out.report({ blocks: [skipped] });
+    expect(plain.written.stdout).toBe(
+      "– codebase-path  project record cannot be read\n",
+    );
+    const rich = capture("rich");
+    rich.out.report({ blocks: [skipped] });
+    expect(rich.written.stdout).toContain(
+      `${styleText("dim", "–", { validateStream: false })} codebase-path`,
+    );
+    const json = capture("json");
+    json.out.report({ blocks: [skipped] });
+    expect(JSON.parse(json.written.stdout).checks).toEqual([
+      {
+        id: "codebase-path",
+        status: "skipped",
+        message: "project record cannot be read",
+      },
+    ]);
+  });
+
   test("a checks block next to an error goes to stderr before the error line", () => {
     const { out, written } = capture("plain");
     out.report({

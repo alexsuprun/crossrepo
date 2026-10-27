@@ -290,18 +290,27 @@ async function deleteMergedBranch(
 }
 
 /**
- * `project-drift` when a folder in the project folder is not a repo of the
- * record. Files and folders whose name starts with `.` (such as `.idea`) do not count.
+ * The folders in the project folder that are not repos of the record, in name
+ * order. Files and folders whose name starts with `.` (such as `.idea`) do not count.
  */
+export function driftFolders(
+  fs: Ctx["fs"],
+  projectDir: string,
+  repos: readonly string[],
+): string[] {
+  const known = new Set(repos);
+  return fs
+    .listDirs(projectDir)
+    .filter((name) => !known.has(name) && !name.startsWith("."));
+}
+
+/** `project-drift` when `driftFolders` finds a folder. */
 function checkDrift(
   fs: Ctx["fs"],
   projectDir: string,
   repos: readonly string[],
 ): void {
-  const known = new Set(repos);
-  const folders = fs
-    .listDirs(projectDir)
-    .filter((name) => !known.has(name) && !name.startsWith("."));
+  const folders = driftFolders(fs, projectDir, repos);
   if (!folders.length) return;
   const list = folders.join(", ");
   throw new XrError({

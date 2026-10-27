@@ -1,15 +1,20 @@
 import type { XrError } from "../errors/index.ts";
 import type { LiveEvent, Report } from "./report.ts";
 
-export type DiscoveryKind = "none" | "codebase" | "project";
+export type DiscoveryKind = "none" | "codebase" | "project" | "broken-project";
 
-/** What the folder from `--codebase-path` or the current folder is (AD-9). */
+/**
+ * What the folder from `--codebase-path` or the current folder is (AD-9).
+ * `broken-project`: a project record that gives no codebase; `error` is the
+ * discovery error other commands fail with.
+ */
 export type Discovery =
   | { kind: "none"; dir: string }
   | { kind: "codebase"; dir: string; codebase: string }
-  | { kind: "project"; dir: string; codebase: string };
+  | { kind: "project"; dir: string; codebase: string }
+  | { kind: "broken-project"; dir: string; error: Error };
 
-/** The codebase folder: the codebase of a project, else the folder itself. */
+/** The codebase folder: the codebase of a project, else the folder itself. Not for `broken-project`. */
 export function codebaseDir(discovery: Discovery): string {
   return "codebase" in discovery ? discovery.codebase : discovery.dir;
 }

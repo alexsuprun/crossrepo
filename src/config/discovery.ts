@@ -3,17 +3,27 @@ import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { CODEBASE_PATH_HINT, ConfigError } from "./errors.ts";
 
-/** What the folder is (AD-9). For a project, `codebase` comes from its record. */
+/**
+ * What the folder is (AD-9). For a project, `codebase` comes from its record.
+ * `broken-project`: a record exists but gives no codebase; `error` is what
+ * every command that does not accept this kind throws.
+ */
 export type Discovery =
   | { kind: "none"; dir: string }
   | { kind: "codebase"; dir: string; codebase: string }
-  | { kind: "project"; dir: string; codebase: string };
+  | { kind: "project"; dir: string; codebase: string }
+  | { kind: "broken-project"; dir: string; error: ConfigError };
 
 /** Looks at `dir` only, never a parent folder (D51). `dir` must be absolute. */
 export function discover(dir: string): Discovery {
   const record = join(dir, ".crossrepo", "project.yaml");
   if (existsSync(record)) {
-    return { kind: "project", dir, codebase: codebaseOf(record, dir) };
+    try {
+      return { kind: "project", dir, codebase: codebaseOf(record, dir) };
+    } catch (error) {
+      if (!(error instanceof ConfigError)) throw error;
+      return { kind: "broken-project", dir, error };
+    }
   }
   return isCodebase(dir)
     ? { kind: "codebase", dir, codebase: dir }

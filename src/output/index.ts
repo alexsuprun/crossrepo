@@ -85,7 +85,7 @@ export interface RepoItem {
   stashKept?: boolean;
 }
 
-export type CheckStatus = "ok" | "warn" | "error";
+export type CheckStatus = "ok" | "warn" | "error" | "skipped";
 
 /** One result of a doctor check. A check with no problem gives one `ok` item with no message. */
 export interface CheckItem {
@@ -227,6 +227,7 @@ const CHECK_LOOK: Record<CheckStatus, { symbol: string; tone: Tone }> = {
   ok: { symbol: SYMBOL.ok, tone: "ok" },
   warn: { symbol: SYMBOL.warning, tone: "warn" },
   error: { symbol: SYMBOL.failed, tone: "error" },
+  skipped: { symbol: SYMBOL.skipped, tone: "muted" },
 };
 
 const TONE_FORMAT = {
