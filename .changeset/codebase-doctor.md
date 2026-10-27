@@ -1,5 +1,0 @@
----
-"crossrepo": minor
----
-
-Add `xr codebase doctor`. In a codebase or project folder it runs seven read-only checks and prints each problem with its fix: `unknown-config-key` (warn), `reserved-var-name` (error, a `project.vars` name that starts with `CROSSREPO_` in any case), `repo-not-in-config` (warn, with the config lines to add), `repo-folder-missing` (error, with the `git clone` command), `agents-heading-no-repo` and `agents-repo-no-heading` (warn, for the `## Repos` section of `AGENTS.md`) and `stale-worktree` (warn, with the `git worktree prune` command). It takes no lock and changes nothing. Any `error` item fails it with the new code `checks-failed` (exit 1) and the `checks` list next to `error`; warnings alone exit 0. The doctor does not also print the live unknown-key warnings. The `checks` block now has text and JSON output (`{id, status, message?, fix?}`). `xr project create` and `xr project remove` now fail first with the new code `reserved-var-name` when `project.vars` has a `CROSSREPO_` name, before any picker or change.

@@ -1,5 +1,0 @@
----
-"crossrepo": minor
----
-
-Add `xr project doctor [<project>]`. It checks one project, chosen as in `xr project sync` (the name, else the current project folder, else a picker), and prints each problem with its fix. It runs the seven codebase checks of `xr codebase doctor`, then seven project checks: `project-record` (error, the record cannot be read or is not valid), `codebase-path` (error, the record points to a codebase that moved, with the `git worktree repair` lines), `worktree-missing` (error), `worktree-not-registered` (error, with the `git worktree repair` command), `worktree-branch` (warn, another branch or a detached HEAD), `project-drift` (error, a folder that is not a repo of the project) and `project-agents-md` (warn, the project `AGENTS.md` does not match the repos). Checks that need data a failed check could not give are the new status `skipped` (`–`, muted). It also runs in a project folder whose record is broken; other commands still fail there as before. It takes no lock and changes nothing. Any `error` item fails it with `checks-failed` (exit 1), with the `project` path and the `checks` list next to `error`.
