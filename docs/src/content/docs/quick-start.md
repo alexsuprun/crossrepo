@@ -148,6 +148,6 @@ The worktrees and the project folder are gone. The branch `feat/login` stays in 
 ## Next
 
 - [Config guide](../guides/config/): the config levels and keys, and how to keep the codebase config in git.
-- [Hooks guide](../guides/hooks/): run your own commands after create and before remove, for example to copy `.env` files.
+- [Hooks guide](../guides/hooks/): run your own commands before and after create and remove (`pre-create`, `post-create`, `pre-remove` and `post-remove`), for example to copy `.env` files.
 - [Output and errors](../output/): text and JSON output, and the exit codes.
 - [xr doctor](../commands/doctor/): when a step fails, check the codebase or the project and get the fix for each problem.

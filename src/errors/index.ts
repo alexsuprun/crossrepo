@@ -144,11 +144,15 @@ export function withBlocks(
   return error;
 }
 
-/** The error of a run stopped by the first Ctrl-C, or of a cancelled picker. */
-export function interrupted(): XrError {
+/**
+ * The error of a run stopped by the first Ctrl-C, or of a cancelled picker.
+ * `cause` is the error of the step the Ctrl-C stopped, if any.
+ */
+export function interrupted(cause?: unknown): XrError {
   return new XrError({
     code: "interrupted",
     message: "Stopped by Ctrl-C.",
+    cause,
   });
 }
 

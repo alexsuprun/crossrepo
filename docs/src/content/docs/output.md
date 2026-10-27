@@ -69,7 +69,7 @@ On failure:
 ```
 
 - `ok` is `true` on success and `false` on failure.
-- `warnings` is always there. Each warning is `{ "code", "message", "hint"? }`. Each warning also goes to stderr when it happens.
+- `warnings` is always there. Each warning is `{ "code", "message", "hint"?, "lines"? }`. `lines` is there only when the warning has output lines, such as the end of a hook's output. Each warning also goes to stderr when it happens.
 - `error` is there only on failure. It has `code` and `message`, and `hint` and `details` only when the error has them.
 - `notes` is there only when the command has notes for you, such as a hint for the next step. It is a list of strings.
 - The other fields belong to the command. On failure they can be there too, next to `error`.
@@ -108,7 +108,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `project-exists` | `xr project create` found a folder at the project path already. `error.details.path` is the path. |
 | `branch-in-use` | `xr project create` or `xr project repo add` got a branch that is checked out in the codebase repo or in another worktree. `error.details` is `{ "repo", "path" }`. |
 | `no-default-branch` | `xr project create` or `xr project repo add` found no default branch for a repo: no `default-branch` in the config and no `origin/HEAD`. |
-| `hook-failed` | A hook line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. |
+| `hook-failed` | A `pre-create`, `post-create` or `pre-remove` line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. A failed `post-remove` line is a warning instead, see below. |
 | `sh-not-found` | A hook must run, and Windows has no Git for Windows `sh.exe`. |
 | `project-not-found` | No project of this codebase has the given folder name or branch. `error.details.project` is the name. Run `xr project list` to see the projects. |
 | `uncommitted-changes` | `xr project remove` or `xr project repo remove` found changed, staged or untracked files that git does not ignore in a worktree of the project. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. Nothing changes. Use `--force` to remove anyway. |
@@ -127,6 +127,7 @@ Warning codes, in `warnings`:
 | `unknown-config-key` | A config file has a key that `xr` does not know. The hint names the closest known key. The command still runs. Doctor commands show these keys as checks instead, not as warnings. |
 | `stale-lock` | The codebase lock belonged to a process that is not running any more, so `xr` took it over. The message has the old process ID. |
 | `branch-not-merged` | `xr project remove --delete-branch` kept a branch because git says it is not merged. The hint has the `git branch -D` command to delete it anyway. The exit code stays 0. |
+| `hook-failed` | A `post-remove` line of `xr project remove` failed, timed out, or was stopped by Ctrl-C, after the project was removed. `lines` has the last 20 lines of its output. The exit code stays 0. |
 
 New commands add new codes. A script must handle a code that it does not know as a failure.
 

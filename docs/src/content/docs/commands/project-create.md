@@ -1,9 +1,9 @@
 ---
 title: xr project create
-description: Make a project folder with a git worktree of each chosen repo on one branch, and run the post-create hook.
+description: Make a project folder with a git worktree of each chosen repo on one branch, and run the pre-create and post-create hooks.
 ---
 
-`xr project create` makes a project: one folder for one branch, with a git worktree of each repo you choose. Then it runs your `post-create` hook. When something fails, or you press Ctrl-C, it undoes everything, so nothing is left behind. The one thing that stays is a new local branch that tracks `origin/<branch>`, because its commits are on `origin`.
+`xr project create` makes a project: one folder for one branch, with a git worktree of each repo you choose. Before it makes anything, it runs your `pre-create` hook. At the end, it runs your `post-create` hook. When something fails, or you press Ctrl-C, it undoes everything, so nothing is left behind. The one thing that stays is a new local branch that tracks `origin/<branch>`, because its commits are on `origin`.
 
 ```sh
 xr project create <branch> <repo>...
@@ -63,9 +63,10 @@ The command takes the codebase lock, `.crossrepo/xr.lock`, then checks everythin
 2. `git fetch origin` runs in each repo, with one step line each. A failed fetch fails the command.
 3. Each repo must have a default branch.
 4. The branch must not be checked out in the codebase repo or in any other worktree of the repo. `xr` never uses `git worktree add --force`.
-5. When `post-create` is set, `sh` must be found.
+5. When `pre-create` or `post-create` is set, `sh` must be found.
+6. The `pre-create` hook runs in the codebase folder. A failed line stops the command with `hook-failed`, and nothing is made: no folder, worktree, branch or record. See [pre-create](#pre-create).
 
-Ctrl-C during these checks changes nothing and exits with code 130.
+Ctrl-C during these checks, also while `pre-create` runs, stops the hook and every process it started, changes nothing, and exits with code 130.
 
 ## Steps
 
@@ -90,6 +91,18 @@ created: 2026-10-20T14:03:12Z
 
 `codebase` is the absolute path of the codebase in the form of your OS. `repos` is in config order. `created` is the time in UTC, to the second.
 
+## pre-create
+
+`project.pre-create` in the config is a list of shell lines that check things before the create makes anything, for example that a tool is installed. It runs the same way as [post-create](#post-create), with one step line `pre-create: <command>` per line, but in the codebase folder, because the project folder does not exist yet. It runs only when every other check passed. When a check fails, for example with `project-exists`, `pre-create` does not run.
+
+```yaml
+project:
+  pre-create:
+    - command -v node >/dev/null || { echo "node is not installed"; exit 1; }
+```
+
+A failed line fails with `hook-failed`, the lines after it do not run, and nothing is made. An `xr` command that changes files, started from the hook, fails with `lock-held`, because this command holds the lock.
+
 ## post-create
 
 `project.post-create` in the config is a list of shell lines. `xr` runs each line with its own `sh -c`, in order, in the project folder, with stdin closed. It stops at the first line that fails. The output of each line goes to stderr as it comes, also with `--json`, and each line has one step line `post-create: <command>`, cut to 60 characters.
@@ -110,17 +123,17 @@ On macOS and Linux, `xr` uses `/bin/sh`. On Windows, it finds `git.exe` on `PATH
 
 ### Variables
 
-Each line gets the environment of `xr`, then the values of `project.vars`, then these 7 variables. A later name wins, so the 7 variables always win. On Windows, names match with case ignored.
+Each line of `pre-create` and `post-create` gets the environment of `xr`, then the values of `project.vars`, then these 7 variables. A later name wins, so the 7 variables always win. On Windows, names match with case ignored.
 
 | Variable | Value |
 | --- | --- |
 | `CROSSREPO_CODEBASE_PATH` | The codebase folder. |
 | `CROSSREPO_CODEBASE_NAME` | `name` from the config, else the codebase folder name. |
-| `CROSSREPO_PROJECT_PATH` | The project folder. |
+| `CROSSREPO_PROJECT_PATH` | The project folder. In `pre-create` it does not exist yet. |
 | `CROSSREPO_PROJECT_NAME` | The project folder name, the slug. |
 | `CROSSREPO_PROJECT_BRANCH` | The branch. |
-| `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line, in record order. |
-| `CROSSREPO_HOOK` | The hook that runs: `post-create` here, and `pre-remove` in [`xr project remove`](../project-remove/). |
+| `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line, in record order. In `pre-create`, the record does not exist yet, so the order is the one the record will have. |
+| `CROSSREPO_HOOK` | The hook that runs: `pre-create` or `post-create` here, and `pre-remove` or `post-remove` in [`xr project remove`](../project-remove/). |
 
 A `project.vars` value can be text, a number or a boolean. A number or a boolean is passed as text: `5432` becomes `"5432"` and `true` becomes `"true"`. A list or a map is `invalid-config`.
 
@@ -135,7 +148,7 @@ When a step fails, or you press Ctrl-C, `xr` undoes the steps that are done, in 
 - The record and `AGENTS.md` are removed.
 - The project folder is removed, and the `projects-dir` folders that this run made.
 
-Undo never runs a hook. What a hook made outside the project folder stays. When an undo fails, the other undos still run, and `error.details.leftovers` lists each thing left with the command to remove it by hand.
+Undo never runs a hook, so a failed `post-create` does not run `pre-remove` or `post-remove`. What a hook made outside the project folder stays. When an undo fails, the other undos still run, and `error.details.leftovers` lists each thing left with the command to remove it by hand.
 
 ## Output
 
@@ -182,8 +195,8 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 | `git-failed` | A git command failed, for example the fetch or the worktree add. |
 | `no-default-branch` | A repo has no `default-branch` in the config and no `origin/HEAD`, or the branch must start from `origin/<default-branch>` and the repo has no such branch. The hint is `git -C "<repo>" remote set-head origin --auto`. |
 | `branch-in-use` | The branch is checked out in the codebase repo or in another worktree. `error.details` is `{ "repo", "path" }`. When that worktree folder was deleted by hand, the hint is `git -C "<repo>" worktree prune`. |
-| `sh-not-found` | `post-create` is set, and Windows has no Git for Windows `sh.exe`. Install Git for Windows. |
-| `hook-failed` | A `post-create` line failed or timed out. The message has the line and its exit code. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. Everything is undone. |
+| `sh-not-found` | `pre-create` or `post-create` is set, and Windows has no Git for Windows `sh.exe`. Nothing changes. Install Git for Windows. |
+| `hook-failed` | A `pre-create` or `post-create` line failed or timed out. The message has the line and its exit code. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. After `pre-create`, nothing was made. After `post-create`, everything is undone. |
 | `git-too-old` | git is older than 2.27. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
 | `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in the picker. Everything is undone. The exit code is 130. |

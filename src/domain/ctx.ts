@@ -40,10 +40,14 @@ export interface ConfigView {
   repos: ConfigRepoView[];
   /** The merged `name`, when set. */
   name?: string;
+  /** The merged `project.pre-create` lines, in order. */
+  preCreate: string[];
   /** The merged `project.post-create` lines, in order. */
   postCreate: string[];
   /** The merged `project.pre-remove` lines, in order. */
   preRemove: string[];
+  /** The merged `project.post-remove` lines, in order. */
+  postRemove: string[];
   /** The merged `project.vars`; numbers and booleans are text already. */
   vars: Record<string, string>;
   /** The keys of any level that the schema does not know, with the files that set them. */

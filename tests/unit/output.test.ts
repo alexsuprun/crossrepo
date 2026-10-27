@@ -149,6 +149,22 @@ describe("live events", () => {
     expect(written.stdout).toBe("");
   });
 
+  test("a warning with lines shows them under the hint", () => {
+    const { out, written } = capture("plain");
+    out.emit({
+      type: "warning",
+      warning: {
+        code: "hook-failed",
+        message: "The post-remove hook `x` failed with exit code 1.",
+        hint: "Fix",
+        lines: ["out 1", "out 2"],
+      },
+    });
+    expect(written.stderr).toBe(
+      "! The post-remove hook `x` failed with exit code 1.\n  Fix\n    out 1\n    out 2\n",
+    );
+  });
+
   test("rich stderr styles with ANSI codes, plain has none", () => {
     const rich = capture("plain", "rich");
     rich.out.emit({ type: "step-end", text: "Fetch", ok: true });
@@ -223,6 +239,19 @@ describe("report in json mode", () => {
       ],
     });
     expect(written.stderr).toBe("! first\n  h\n! second\n");
+  });
+
+  test("keeps the lines of a warning", () => {
+    const { out, written } = capture("json");
+    const warning = {
+      code: "hook-failed",
+      message: "m",
+      hint: "h",
+      lines: ["a"],
+    };
+    out.emit({ type: "warning", warning });
+    out.report({ blocks: [] });
+    expect(JSON.parse(written.stdout).warnings).toEqual([warning]);
   });
 
   test("a fields block is a list with absolute paths, plain codes and extra spread in", () => {

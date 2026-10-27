@@ -37,8 +37,10 @@ To see the merged result and the file that gives each value, run [xr config show
 | `repos.<name>.remote` | The URL of the repo. `xr codebase clone` clones it, exactly as written. |
 | `repos.<name>.default-branch` | The branch that new project branches start from and that `xr project sync` merges. When it is not set, `xr` uses the branch that `origin/HEAD` points to. |
 | `repos.<name>.description` | A short text about the repo. `xr` puts it in `AGENTS.md` and shows it in the repo lists. |
+| `project.pre-create` | A list of shell commands to run in `xr project create` before it makes anything. See the [hooks guide](../hooks/). |
 | `project.post-create` | A list of shell commands to run after `xr project create`. See the [hooks guide](../hooks/). |
 | `project.pre-remove` | A list of shell commands to run before `xr project remove` deletes anything. See the [hooks guide](../hooks/). |
+| `project.post-remove` | A list of shell commands to run after `xr project remove` has removed the project. See the [hooks guide](../hooks/). |
 | `project.vars` | Your own variables for hooks. See the [hooks guide](../hooks/#your-own-variables). |
 
 The `repos:` list decides which repos the codebase has. A repo folder that is not in the list is not a repo of the codebase.

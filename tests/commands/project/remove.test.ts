@@ -75,11 +75,19 @@ function writeConfig(extra = "") {
 
 /** Puts `pre-remove` lines in the codebase config. */
 function preRemove(lines: string[]) {
+  hooks({ "pre-remove": lines });
+}
+
+/** Puts hook lists, such as `{ "post-remove": [...] }`, and optional vars YAML in the codebase config. */
+function hooks(lists: Record<string, string[]>, vars = "") {
   writeConfig(
     [
       "project:",
-      "  pre-remove:",
-      ...lines.map((line) => `    - ${JSON.stringify(line)}`),
+      ...Object.entries(lists).flatMap(([name, lines]) => [
+        `  ${name}:`,
+        ...lines.map((line) => `    - ${JSON.stringify(line)}`),
+      ]),
+      vars,
       "",
     ].join("\n"),
   );
@@ -638,6 +646,164 @@ describe("xr project remove: pre-remove", () => {
     expect(result.code).toBe(0);
     expect(JSON.parse(readFileSync(out, "utf8")).error.code).toBe("lock-held");
     expect(existsSync(join(projects, "other"))).toBe(false);
+  });
+});
+
+describe("xr project remove: post-remove", () => {
+  test("runs each line in the codebase folder with CROSSREPO_HOOK=post-remove, after the project is gone", async () => {
+    const out = join(iso.root, "post.txt");
+    hooks(
+      {
+        "post-remove": [
+          `{ basename "$PWD"; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_PATH"; echo "$CROSSREPO_PROJECT_BRANCH"; echo "$CROSSREPO_PROJECT_REPOS"; echo "$PORT"; if [ -e "$CROSSREPO_PROJECT_PATH" ]; then echo exists; else echo gone; fi; git -C api worktree list | wc -l | tr -d ' '; } > "${out}"`,
+          `echo second >> "${out}"`,
+        ],
+      },
+      "  vars:\n    PORT: 5432",
+    );
+    const result = await json([...REMOVE, "feat--login", "--delete-branch"]);
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([]);
+    expect(readFileSync(out, "utf8").trim().split(/\r?\n/)).toEqual([
+      "shop",
+      "post-remove",
+      login,
+      "feat/login",
+      "api",
+      "web",
+      "5432",
+      "gone",
+      "1",
+      "second",
+    ]);
+    expect(result.stderr).toContain("post-remove: {");
+    expect(branches("api")).toEqual(["main"]);
+  });
+
+  test("a failing line: exit 0 with a hook-failed warning and its output, the lines after it do not run", async () => {
+    const never = join(iso.root, "never.txt");
+    hooks({
+      "post-remove": ["echo out-1; echo out-2 >&2; exit 4", `touch "${never}"`],
+    });
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(result.data.ok).toBe(true);
+    expect(result.data.warnings).toEqual([
+      {
+        code: "hook-failed",
+        message:
+          "The post-remove hook `echo out-1; echo out-2 >&2; exit 4` failed with exit code 4.",
+        hint: `The project is removed. Fix the line in \`project.post-remove\`, then run by hand the lines that did not run: \`echo out-1; echo out-2 >&2; exit 4\`, \`touch "${never}"\`.`,
+        lines: ["out-1", "out-2"],
+      },
+    ]);
+    expect(existsSync(never)).toBe(false);
+    expect(state()).toEqual(removedState());
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("a failing line in text mode: the warning, the hint and the output lines on stderr", async () => {
+    hooks({ "post-remove": ["echo out-1; exit 1"] });
+    const result = await run([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain(
+      "! The post-remove hook `echo out-1; exit 1` failed with exit code 1.\n  The project is removed. Fix the line in `project.post-remove`, then run by hand the lines that did not run: `echo out-1; exit 1`.\n    out-1\n",
+    );
+    expect(existsSync(login)).toBe(false);
+  });
+
+  test("Ctrl-C while a line runs: the line stops, the rest do not run, a warning, exit 0", async () => {
+    const marker = join(iso.root, "started");
+    const never = join(iso.root, "never.txt");
+    hooks({
+      "post-remove": [`touch "${marker}"; sleep 30`, `touch "${never}"`],
+    });
+    const started = Date.now();
+    const pending = json([...REMOVE, "feat--login"]);
+    for (let i = 0; i < 200 && !existsSync(marker); i += 1) await sleep(50);
+    interrupts.fire();
+    const result = await pending;
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(result.code).toBe(0);
+    expect(result.data.ok).toBe(true);
+    expect(result.data.warnings).toHaveLength(1);
+    expect(result.data.warnings[0].code).toBe("hook-failed");
+    expect(result.data.warnings[0].message).toBe(
+      `The post-remove hook \`touch "${marker}"; sleep 30\` was stopped by Ctrl-C.`,
+    );
+    expect(result.data.warnings[0].hint).toBe(
+      `The project is removed. Run by hand the lines that did not run, if they are needed: \`touch "${marker}"; sleep 30\`, \`touch "${never}"\`.`,
+    );
+    expect(existsSync(never)).toBe(false);
+    expect(state()).toEqual(removedState());
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("Ctrl-C between two lines: the rest do not run, the warning names them, exit 0", async () => {
+    hooks({ "post-remove": ["first", "second", "third"] });
+    const ran: string[] = [];
+    const real = hooksAdapter.createHooks;
+    spies.push(
+      spyOn(hooksAdapter, "createHooks").mockImplementation((options) => {
+        const hooksPort = real(options);
+        return {
+          ...hooksPort,
+          run: async ({ command }) => {
+            ran.push(command);
+            if (command === "first") interrupts.fire();
+            return { ok: true };
+          },
+        };
+      }),
+    );
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(ran).toEqual(["first"]);
+    expect(result.data.warnings).toEqual([
+      {
+        code: "hook-failed",
+        message:
+          "The post-remove hook was stopped by Ctrl-C before `second`, `third` ran.",
+        hint: "The project is removed. Run by hand the lines that did not run, if they are needed: `second`, `third`.",
+      },
+    ]);
+    expect(state()).toEqual(removedState());
+  });
+
+  test("a failed delete step: post-remove does not run", async () => {
+    const marker = join(iso.root, "ran.txt");
+    hooks({ "post-remove": [`touch "${marker}"`] });
+    fakeGit((g) => withFault(g, "worktreeRemove", 2));
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.details.leftovers.length).toBeGreaterThan(0);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("a failed pre-remove: nothing is removed, post-remove does not run", async () => {
+    const marker = join(iso.root, "ran.txt");
+    hooks({ "pre-remove": ["exit 1"], "post-remove": [`touch "${marker}"`] });
+    const before = state();
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.data.error.code).toBe("hook-failed");
+    expect(result.data.error.message).toContain("pre-remove");
+    expect(existsSync(marker)).toBe(false);
+    expect(state()).toEqual(before);
+  });
+
+  test("no sh with only post-remove set: sh-not-found, nothing changes", async () => {
+    hooks({ "post-remove": ["true"] });
+    const real = hooksAdapter.createHooks;
+    spies.push(
+      spyOn(hooksAdapter, "createHooks").mockImplementation((options) =>
+        real({ ...options, platform: "win32", exists: () => false }),
+      ),
+    );
+    const before = state();
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("sh-not-found");
+    expect(state()).toEqual(before);
   });
 });
 
