@@ -8,14 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  timing:
-    name: git timing (${{ matrix.os }})
+  workers:
+    name: test workers (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest]
     steps:
       - name: Turn off Defender real-time scanning
         if: runner.os == 'Windows'
@@ -27,31 +27,21 @@ jobs:
           no-cache: true
       - run: bun install --frozen-lockfile
         shell: bash
-      - name: Which git (bash)
+      # The full suite once per worker count; "default" is plain --parallel, one worker per core.
+      - name: Full suite with 3 worker counts
         shell: bash
         run: |
-          echo "PATH=$PATH"
-          which -a git
-      - name: Which git (pwsh)
-        shell: pwsh
-        run: |
-          $env:PATH
-          Get-Command git -All | Format-Table -AutoSize Source
-      - name: Timing (bash)
-        shell: bash
-        run: bun scripts/git-timing.ts
-      - name: Timing (pwsh)
-        shell: pwsh
-        run: bun scripts/git-timing.ts
-      - name: One test file (bash)
-        shell: bash
-        run: |
-          start=$(date +%s)
-          bun test tests/commands/codebase/clone.test.ts --timeout 120000
-          echo "clone.test.ts under bash: $(( $(date +%s) - start )) s"
-      - name: One test file (pwsh)
-        shell: pwsh
-        run: |
-          $t = Measure-Command { bun test tests/commands/codebase/clone.test.ts --timeout 120000 | Out-Default }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "clone.test.ts under pwsh: $([int]$t.TotalSeconds) s"
+          for workers in default 8 12; do
+            flag=--parallel
+            [ "$workers" = default ] || flag="--parallel=$workers"
+            start=$(date +%s)
+            code=0
+            bun test "$flag" --timeout 30000 > "out-$workers.log" 2>&1 || code=$?
+            took=$(( $(date +%s) - start ))
+            line="workers=$workers ($(grep -o '[0-9]*x PARALLEL' "out-$workers.log")) exit=$code wall=${took}s"
+            line="$line $(grep -E '^ *[0-9]+ (pass|fail)$' "out-$workers.log" | tr -s ' \n' ' ')"
+            line="$line timeouts=$(grep -c 'timed out after' "out-$workers.log" || true)"
+            echo "$line"
+            echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^\(fail\)' "out-$workers.log" || true
+          done
