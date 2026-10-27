@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 export interface Isolation {
   /** The temp folder, with symlinks resolved. Put test codebases here. */
   root: string;
-  /** `HOME` and `USERPROFILE` point here. */
+  /** `HOME` and `USERPROFILE` point here; `.gitconfig` here holds the test identity. */
   home: string;
   /** Puts the env back and deletes `root`. */
   restore(): void;
@@ -21,22 +21,26 @@ export interface Isolation {
 const ENV_NAMES = [
   "HOME",
   "USERPROFILE",
+  "XDG_CONFIG_HOME",
   "GIT_CONFIG_GLOBAL",
   "GIT_CONFIG_NOSYSTEM",
 ] as const;
 
 /**
- * Sets `HOME`, `USERPROFILE`, `GIT_CONFIG_GLOBAL` (an empty config with a test
- * identity) and `GIT_CONFIG_NOSYSTEM=1` to a new temp folder. Every adapter,
- * command and smoke test that touches files or git uses it (AD-13).
+ * Points `HOME` and `USERPROFILE` at a new temp folder whose `.gitconfig` has
+ * only a test identity, `XDG_CONFIG_HOME` at an empty folder, and sets
+ * `GIT_CONFIG_NOSYSTEM=1`. It unsets `GIT_CONFIG_GLOBAL`, which needs git 2.32
+ * while the floor is 2.27. Every adapter, command and smoke test that touches
+ * files or git uses it (AD-13).
  */
 export function isolate(): Isolation {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "xr-test-")));
   const home = join(root, "home");
   mkdirSync(home);
-  const gitConfig = join(root, "gitconfig");
+  const xdg = join(root, "xdg-config");
+  mkdirSync(xdg);
   writeFileSync(
-    gitConfig,
+    join(home, ".gitconfig"),
     "[user]\n\tname = xr test\n\temail = xr-test@example.com\n",
   );
   const saved = Object.fromEntries(
@@ -45,9 +49,10 @@ export function isolate(): Isolation {
   Object.assign(process.env, {
     HOME: home,
     USERPROFILE: home,
-    GIT_CONFIG_GLOBAL: gitConfig,
+    XDG_CONFIG_HOME: xdg,
     GIT_CONFIG_NOSYSTEM: "1",
   });
+  delete process.env.GIT_CONFIG_GLOBAL;
   return {
     root,
     home,

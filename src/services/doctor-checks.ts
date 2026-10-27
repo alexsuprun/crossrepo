@@ -148,7 +148,14 @@ export async function projectDoctorChecks(
     "project-record": [],
     "codebase-path": found
       ? []
-      : [codebasePathProblem(project, record, recordCodebase)],
+      : [
+          codebasePathProblem(
+            project,
+            record,
+            recordCodebase,
+            await repairNeeds(ctx),
+          ),
+        ],
     "worktree-missing": worktreeMissingProblems(ctx, project, record),
     "worktree-not-registered": worktrees?.notRegistered ?? "skipped",
     "worktree-branch": worktrees?.branch ?? "skipped",
@@ -206,16 +213,36 @@ function isCodebase(ctx: CheckCtx, dir: string): boolean {
   );
 }
 
+/**
+ * The line that starts a `git worktree repair` fix on git older than 2.29,
+ * which has no `worktree repair`; empty on newer git, or when git cannot say
+ * its version.
+ */
+async function repairNeeds(ctx: CheckCtx): Promise<string[]> {
+  let version: string;
+  try {
+    version = await ctx.git.version();
+  } catch {
+    return [];
+  }
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  return major > 2 || (major === 2 && minor >= 29)
+    ? []
+    : [`needs git 2.29 or newer (you have ${version}):`];
+}
+
 /** `<codebase>` stays as written: the right folder is not known. */
 function codebasePathProblem(
   project: string,
   record: ProjectRecord,
   resolved: string,
+  needs: string[],
 ): Problem {
   return {
     status: "error",
     message: { path: resolved },
     fix: [
+      ...needs,
       "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
       ...record.repos.map(
         (repo) =>
@@ -270,10 +297,12 @@ async function worktreeProblems(
         return other?.dev === self.dev && other.ino === self.ino;
       });
       if (!registered || !readable.ok) {
+        const repair = `git -C "${dir}" worktree repair "${path}"`;
+        const needs = await repairNeeds(ctx);
         notRegistered.push({
           status: "error",
           message: { path },
-          fix: { code: `git -C "${dir}" worktree repair "${path}"` },
+          fix: needs.length ? [...needs, repair].join("\n") : { code: repair },
         });
       }
     }

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import * as promptAdapter from "../../../src/adapters/prompt/index.ts";
-import { git } from "../../helpers/git.ts";
+import { git, repairNeeds } from "../../helpers/git.ts";
 import { writeFile } from "../../helpers/isolate.ts";
 import {
   gitRefs,
@@ -200,12 +200,16 @@ describe("xr project doctor: problems", () => {
     const api = join(env.codebase, "api");
     const result = await t.json(DOCTOR, { cwd: moved });
     expect(result.code).toBe(1);
+    const needs = repairNeeds();
     expect(itemsOf(result.data, "worktree-not-registered")).toEqual([
       {
         id: "worktree-not-registered",
         status: "error",
         message: join(moved, "api"),
-        fix: `git -C "${api}" worktree repair "${join(moved, "api")}"`,
+        fix: [
+          ...needs,
+          `git -C "${api}" worktree repair "${join(moved, "api")}"`,
+        ].join("\n"),
       },
     ]);
     expect(itemsOf(result.data, "stale-worktree")).toEqual([
@@ -216,6 +220,8 @@ describe("xr project doctor: problems", () => {
         fix: `git -C "${api}" worktree prune`,
       },
     ]);
+    // `git worktree repair` needs git 2.29.
+    if (needs.length) return;
     git(api, "worktree", "repair", join(moved, "api"));
     const fixed = await t.json(DOCTOR, { cwd: moved });
     expect(fixed.code).toBe(0);
@@ -356,6 +362,7 @@ describe("xr project doctor: problems", () => {
         status: "error",
         message: gone,
         fix: [
+          ...repairNeeds(),
           "set `codebase` in `.crossrepo/project.yaml` to the codebase folder, then run:",
           `git -C "<codebase>/api" worktree repair "${join(login, "api")}"`,
         ].join("\n"),

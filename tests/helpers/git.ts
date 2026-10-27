@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseVersion } from "../../src/adapters/git/index.ts";
 
 /** How `makeRepos` sets up one repo. */
 export interface RepoSpec {
@@ -32,6 +33,19 @@ export function git(cwd: string, ...args: string[]): string {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   }
   return result.stdout;
+}
+
+/**
+ * The lines xr puts before a `git worktree repair` fix with the git on PATH:
+ * a needs line on git older than 2.29, which has no `worktree repair`.
+ */
+export function repairNeeds(): string[] {
+  const { stdout } = spawnSync("git", ["version"], { encoding: "utf8" });
+  const version = parseVersion(stdout ?? "");
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  return major > 2 || (major === 2 && minor >= 29)
+    ? []
+    : [`needs git 2.29 or newer (you have ${version}):`];
 }
 
 /**
@@ -102,7 +116,9 @@ function repoTemplate({
   const base = mkdtempSync(join(templateRoot, "kind-"));
   const repo = join(base, "repo");
   mkdirSync(repo);
-  git(repo, "init", "--quiet", `--initial-branch=${branch}`);
+  // Not `init --initial-branch`: it needs git 2.28, and the floor is 2.27.
+  git(repo, "init", "--quiet");
+  git(repo, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
   // No background git may write into a template while it is copied: git runs
   // auto maintenance in the background after a commit, and auto gc after a push.
   git(

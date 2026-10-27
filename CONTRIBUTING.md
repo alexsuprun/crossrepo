@@ -30,7 +30,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/) such as `feat: 
 
 ## CI
 
-Every pull request runs CI. On Linux, macOS and Windows: `checks` (lint, typecheck, unit, adapter and command tests), `smoke` (smoke tests under Node 22.13 and Node 24) and `bun-only` (the bundle under the pinned Bun and Bun 1.3.0 with Node removed from PATH). On Linux only: `docs build` (builds the docs site) and `pr-title`. All of them must pass before merge.
+Every pull request runs CI. On Linux, macOS and Windows: `checks` (lint, typecheck, unit, adapter and command tests), `smoke` (smoke tests under Node 22.13, Node 24 and Node 26), `e2e` (packs the package, installs it with `npm i -g` under Node 22.13, and runs `xr codebase init`, `xr project create` and `xr project remove` with `tests/e2e/round-trip.ts`) and `bun-only` (the bundle under the pinned Bun and Bun 1.3.0 with Node removed from PATH). On Linux only: `docs build` (builds the docs site), `git-floor` (command and smoke tests under git 2.27.0, built from source) and `pr-title`. All of them must pass before merge.
 
 ## Dependency updates
 
