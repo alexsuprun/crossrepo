@@ -100,7 +100,7 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           publish-script: bun run release
-          version: bun run version-packages
+          version-script: bun run version-packages
           pr-title: "chore: version packages"
           commit-message: "chore: version packages"
         env:
