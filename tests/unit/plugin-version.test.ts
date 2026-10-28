@@ -28,7 +28,11 @@ describe("plugin version", () => {
     const action = steps.find((step: { uses?: string }) =>
       step.uses?.startsWith("changesets/action@"),
     );
-    expect(action?.with?.version).toBe("bun run version-packages");
+    // changesets/action v2 renamed the input `version` to `version-script` and fails on the old name.
+    expect(action?.with).toMatchObject({
+      "version-script": "bun run version-packages",
+    });
+    expect(action?.with).not.toHaveProperty("version");
   });
 });
 
