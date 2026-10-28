@@ -18,6 +18,7 @@ Instructions for AI agents working on crossrepo. These rules apply as code arriv
 - `bun run test:commands`: run the tests in `tests/commands/`.
 - `bun run test:smoke`: build `dist/xr.js`, then run the `*.smoke.ts` files in `tests/smoke/` against it under Node and under Bun.
 - `bun run build`: bundle the CLI to `dist/xr.js`.
+- `bun run skills:refs`: write `skills/<name>/references/commands.md` from the `--help` text of every command. Run it after you change a command or an option; a test fails on a stale file.
 
 CI (`.github/workflows/ci.yml`) runs `lint`, `typecheck`, `test` and `test:smoke` on Linux, macOS and Windows. Only Linux runs `test` with coverage; macOS runs `test:serial` and Windows runs `test:no-coverage`. The `e2e` job packs the package, installs it with `npm i -g` under Node 22.13 and runs `tests/e2e/round-trip.ts` against the installed `xr` on all 3 OS (run it locally with `node --experimental-strip-types tests/e2e/round-trip.ts --xr dist/xr.js`). The `git-floor` job runs `test:commands` and `test:smoke` under git 2.27.0 on Linux, so tests may use no git feature newer than 2.27. Set `XR_SMOKE_RUNTIMES=bun` (a comma list of `node` and `bun`; default both) to run the smoke tests under Bun only.
 
@@ -65,3 +66,10 @@ Each folder in `src/` is one layer. A layer may import only the layers in its ro
 User docs live only in `docs/src/content/docs/`, as plain Markdown. Do not copy them anywhere else.
 
 `docs/` is its own package with its own `bun.lock`, outside Biome, the tsconfigs and `bun run validate`. Preview the site with `cd docs && bun install && bun run dev`.
+
+## Skills
+
+The agent skills live in `skills/`, one folder per skill (`xr`, `xr-init`, `xr-hooks`), and ship as the Claude Code plugin in `.claude-plugin/`.
+
+- When a change alters what an agent sees from `xr`, such as an error code, a result field or a step, update the `SKILL.md` that describes it in the same pull request.
+- Do not set `version` in `.claude-plugin/plugin.json` by hand. `version-packages` copies it from `package.json` at release.

@@ -37,6 +37,23 @@ In Claude Code, add the repo as a plugin marketplace, then install the plugin `x
 
 The skills then show with the prefix `xr:`, such as `xr:xr-init`. Skills need Claude Code 2.0.20 or newer. Claude Code reads the `AGENTS.md` that `xr` writes from version 2.1.281.
 
+## Update the skills
+
+With `npx skills`, check for new versions, then install them:
+
+```sh
+npx skills check
+npx skills update
+```
+
+In Claude Code, auto-update is off for the `xr` marketplace, as for every marketplace that is not an official one. Update the plugin from your shell:
+
+```sh
+claude plugin update xr@xr
+```
+
+You can also open `/plugin`, select `xr` on the **Installed** tab and select **Update now**. To update it automatically, select `xr` on the **Marketplaces** tab and select **Enable auto-update**.
+
 ## The skills
 
 | Skill | What it does |
