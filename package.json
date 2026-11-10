@@ -55,13 +55,13 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
+    "@biomejs/biome": "2.6.6",
     "@changesets/changelog-github": "1.0.1",
     "@changesets/cli": "3.0.3",
     "@clack/prompts": "1.8.1",
     "@types/bun": "1.4.4",
     "@types/node": "^22",
-    "commander": "15.0.0",
+    "commander": "15.1.0",
     "fastest-levenshtein": "1.0.16",
     "mdast-util-from-markdown": "2.1.0",
     "typescript": "7.0.2",
