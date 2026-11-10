@@ -7,7 +7,10 @@ import {
   SKILL_FOLDERS,
 } from "../../scripts/skills-refs.ts";
 import { ERROR_CODES } from "../../src/errors/index.ts";
-import { CODEBASE_CHECK_IDS } from "../../src/services/doctor-checks.ts";
+import {
+  CODEBASE_CHECK_IDS,
+  PROJECT_CHECK_IDS,
+} from "../../src/services/doctor-checks.ts";
 import {
   checkCliNames,
   checkCodeTokens,
@@ -36,6 +39,7 @@ const KNOWN_TOKENS = new Set<string>([
   ...ERROR_CODES,
   ...WARNING_CODES,
   ...CODEBASE_CHECK_IDS,
+  ...PROJECT_CHECK_IDS,
   ...ALLOWED_WORDS,
 ]);
 

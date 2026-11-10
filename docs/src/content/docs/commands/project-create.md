@@ -18,16 +18,37 @@ It works only in a codebase folder, or with `--codebase-path <path>`. In a proje
 | Argument or option | What it does |
 | --- | --- |
 | `<branch>` | The branch of the project. It is required. |
-| `<repo>...` | The repos of the project, by their names in the config. The project gets them in config order, each one once. |
+| `<repo>...` | The repos of the project, by their names in the config. The project gets them in config order, each one once. The repos with `always: true` are added too, see [Repos in every project](#repos-in-every-project). |
 | `--all` | Use every repo of the config. A repo that is not on disk is an error, never skipped. |
 
 You cannot give repo names and `--all` together. A branch name with `<`, `>`, `:`, `|`, `"`, `?` or `*` is a usage error on every OS, because Windows does not allow these characters in a folder name.
 
 ## Pick the repos
 
-With no repo names and no `--all`, a picker "Pick the repos of the project" opens in a terminal. It lists the repos of the config that are on disk, in config order. Mark repos with Space and press Enter. You must mark at least one. Ctrl-C or Escape stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
+With no repo names and no `--all`, a picker "Pick the repos of the project" opens in a terminal. It lists the repos of the config that are on disk, in config order. Mark repos with Space and press Enter. You must mark at least one. A repo with `always: true` is already marked, and you can unmark it. Ctrl-C or Escape stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
 
 The picker opens only when stdin and stdout are a terminal, and neither `--json` nor `--no-interactive` is given. Otherwise the command fails with `missing-argument`, and the message lists the repos. With `--json`, `error.details` is `{ "argument": "repos", "choices": ["api", "web"] }`. When no repo is on disk, the command fails with `There is no repo on disk to put in a project.` and the hint `xr codebase clone`, in every mode.
+
+## Repos in every project
+
+A repo with `always: true` in the [config](../../guides/config/#keys) goes into each new project:
+
+```yaml
+repos:
+  specs:
+    remote: git@github.com:acme/specs.git
+    always: true
+```
+
+- With repo names, `xr` adds each `always` repo, also when you do not name it. A repo that you name and that is `always` is used once. The project gets its repos in config order, so `xr project create feat/x api` gives a project with `api` and `specs`.
+- With `--all`, the project gets every repo, as without the key.
+- In the picker, each `always` repo is already marked. Unmark it to make a project without it.
+- With no repo names, no `--all` and no picker, the command still fails with `missing-argument`, also when an `always` repo is not on disk. `xr` adds `always` repos only to a list that you give or pick.
+- An `always` repo that is not on disk fails the command with `repos-not-ready` and the hint `xr codebase clone`, the same as a named repo, and nothing is made. With the picker, this check runs after you pick, so the picker opens first.
+
+`always: false` in `config.local.yaml` (or the user config) turns off an `always: true` of the codebase config.
+
+The hooks see an `always` repo in `CROSSREPO_PROJECT_REPOS`, like any other repo. To take it out of one project later, run [`xr project repo remove`](../project-repo-remove/). The key does not change projects that exist. [`xr project doctor`](../project-doctor/) gives a `warn` item `always-repo-missing` for a project that does not have an `always` repo.
 
 ## Folder layout
 
@@ -190,7 +211,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 | `invalid-config` | The config is not valid, for example a `project.vars` value is a list or a map. |
 | `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The message names each such name and the config file that sets it. The hint is `xr codebase doctor`. It comes first, before the picker: no lock, no change. |
 | `repo-not-found` | A repo name is not in the config. The hint names `xr codebase repo list`. |
-| `repos-not-ready` | A chosen repo is not on disk, also with `--all`. `error.details.repos` has one row per repo. The hint names `xr codebase clone`. |
+| `repos-not-ready` | A chosen repo, or a repo with `always: true`, is not on disk, also with `--all`. `error.details.repos` has one row per repo. The hint names `xr codebase clone`. |
 | `project-exists` | The project folder exists. `error.details.path` is the path. |
 | `git-failed` | A git command failed, for example the fetch or the worktree add. |
 | `no-default-branch` | A repo has no `default-branch` in the config and no `origin/HEAD`, or the branch must start from `origin/<default-branch>` and the repo has no such branch. The hint is `git -C "<repo>" remote set-head origin --auto`. |

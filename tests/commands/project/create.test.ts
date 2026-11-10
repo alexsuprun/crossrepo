@@ -862,3 +862,133 @@ describe("xr project create with a reserved var name", () => {
     expect(existsSync(join(projects, "feat--x"))).toBe(false);
   });
 });
+
+describe("xr project create: always repos", () => {
+  /** Sets `always: true` on `names` in the local config. */
+  function always(...names: string[]) {
+    writeFile(
+      localConfig,
+      [
+        "repos:",
+        ...names.flatMap((name) => [`  ${name}:`, "    always: true"]),
+        "",
+      ].join("\n"),
+    );
+  }
+
+  function repoNames(data: { repos: { repo: string }[] }): string[] {
+    return data.repos.map(({ repo }) => repo);
+  }
+
+  test("an always repo that is not named is added, and hooks see it in CROSSREPO_PROJECT_REPOS", async () => {
+    postCreate(['printf "%s" "$CROSSREPO_PROJECT_REPOS" > repos.txt']);
+    always("api");
+    const result = await json([...CREATE, "feat/x", "web"]);
+    expect(result.code).toBe(0);
+    expect(repoNames(result.data)).toEqual(["api", "web"]);
+    const project = join(projects, "feat--x");
+    expect(readFileSync(join(project, "repos.txt"), "utf8")).toBe("api\nweb");
+    expect(
+      readFileSync(join(project, ".crossrepo", "project.yaml"), "utf8"),
+    ).toContain("repos:\n  - api\n  - web\n");
+  });
+
+  test("an always repo that is also named is used once", async () => {
+    always("web");
+    const result = await json([...CREATE, "feat/x", "api", "web"]);
+    expect(result.code).toBe(0);
+    expect(repoNames(result.data)).toEqual(["api", "web"]);
+  });
+
+  test("--all gives every repo, as without the key", async () => {
+    always("web");
+    const result = await json([...CREATE, "feat/x", "--all"]);
+    expect(result.code).toBe(0);
+    expect(repoNames(result.data)).toEqual(["api", "web"]);
+  });
+
+  test("always: false changes nothing", async () => {
+    writeFile(localConfig, "repos:\n  web:\n    always: false\n");
+    const result = await json([...CREATE, "feat/x", "api"]);
+    expect(result.code).toBe(0);
+    expect(repoNames(result.data)).toEqual(["api"]);
+  });
+
+  test("two always repos are both added, in config order", async () => {
+    const docs = makeRepos(codebase, { docs: {} });
+    writeConfig(
+      `  docs:\n    remote: ${JSON.stringify(docs.docs)}\n    default-branch: main\n`,
+    );
+    always("docs", "api");
+    const result = await json([...CREATE, "feat/x", "web"]);
+    expect(result.code).toBe(0);
+    expect(repoNames(result.data)).toEqual(["api", "web", "docs"]);
+  });
+
+  test("an always repo that is not on disk: repos-not-ready with the clone hint, nothing made", async () => {
+    writeConfig("  docs:\n    remote: nowhere\n    default-branch: main\n");
+    always("docs");
+    const before = state();
+    const result = await json([...CREATE, "feat/x", "api"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("repos-not-ready");
+    expect(result.data.error.details.repos).toEqual([
+      { repo: "docs", problem: "not on disk", fix: "xr codebase clone" },
+    ]);
+    expect(state()).toEqual(before);
+  });
+
+  test("no names, not interactive: missing-argument, as without the key", async () => {
+    always("web");
+    const result = await json([...CREATE, "feat/x"]);
+    expect(result.code).toBe(2);
+    expect(result.data.error.code).toBe("missing-argument");
+    expect(existsSync(projects)).toBe(false);
+  });
+
+  test("the picker starts with the always repos marked", async () => {
+    const requests = fakePickMany(spies, ["api", "web"]);
+    always("web");
+    const result = await run([...CREATE, "feat/x"], { tty: true });
+    expect(result.code).toBe(0);
+    expect(requests[0]?.choices).toEqual(["api", "web"]);
+    expect(requests[0]?.initial).toEqual(["web"]);
+  });
+
+  test("an always repo that is not on disk, with the picker: the picker opens, then repos-not-ready, nothing made", async () => {
+    const requests = fakePickMany(spies, ["api"]);
+    writeConfig("  docs:\n    remote: nowhere\n    default-branch: main\n");
+    always("docs");
+    const before = state();
+    const result = await run(["--json", ...CREATE, "feat/x"], { tty: true });
+    expect(result.code).toBe(1);
+    const data = JSON.parse(result.stdout);
+    expect(data.error.code).toBe("repos-not-ready");
+    expect(data.error.details.repos).toEqual([
+      { repo: "docs", problem: "not on disk", fix: "xr codebase clone" },
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.choices).toEqual(["api", "web"]);
+    expect(state()).toEqual(before);
+  });
+
+  test("an always repo that is not on disk, no names, not interactive: missing-argument, nothing made", async () => {
+    writeConfig("  docs:\n    remote: nowhere\n    default-branch: main\n");
+    always("docs");
+    const before = state();
+    const result = await json([...CREATE, "feat/x"]);
+    expect(result.code).toBe(2);
+    expect(result.data.error.code).toBe("missing-argument");
+    expect(state()).toEqual(before);
+  });
+
+  test("the picker with the real adapter: the user unmarks the always repo", async () => {
+    always("web");
+    // Space marks api, Down and Space unmark web, Enter ends the picker.
+    fakeKeys(spies, [" ", "\x1b[B", " ", "\r"]);
+    const result = await run([...CREATE, "feat/x"], { tty: true });
+    expect(result.code).toBe(0);
+    expect(existsSync(join(projects, "feat--x", "api"))).toBe(true);
+    expect(existsSync(join(projects, "feat--x", "web"))).toBe(false);
+  });
+});

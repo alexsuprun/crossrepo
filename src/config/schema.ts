@@ -8,7 +8,12 @@ const varValue = z
   .transform(String)
   .nullish();
 
-const repoShape = { remote: text, "default-branch": text, description: text };
+const repoShape = {
+  remote: text,
+  "default-branch": text,
+  description: text,
+  always: z.boolean().nullish(),
+};
 const projectShape = {
   "pre-create": list,
   "post-create": list,
@@ -45,7 +50,12 @@ export interface ConfigValues {
   "projects-dir"?: string;
   repos?: Record<
     string,
-    { remote?: string; "default-branch"?: string; description?: string }
+    {
+      remote?: string;
+      "default-branch"?: string;
+      description?: string;
+      always?: boolean;
+    }
   >;
   project?: {
     "pre-create"?: string[];

@@ -12,6 +12,8 @@ export interface PickRequest {
   choices: readonly string[];
   /** A muted text shown next to a choice, by choice value. */
   hints?: Readonly<Record<string, string>>;
+  /** The choices that start marked; only `pickMany` reads it. */
+  initial?: readonly string[];
   /** The start of the error message when there is no picker. */
   missing: string;
   /** The word before the list of choices in that message, e.g. `Choices`. */
@@ -85,6 +87,7 @@ export function createMultiPrompt({
       const picked = await multiselect({
         message: request.message,
         options: request.choices.map((value) => ({ value })),
+        initialValues: [...(request.initial ?? [])],
         required: true,
         input: input ?? process.stdin,
         output: output ?? process.stderr,

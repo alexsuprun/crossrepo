@@ -297,6 +297,7 @@ export function configView({
       remote: repo.remote,
       defaultBranch: repo["default-branch"],
       description: repo.description,
+      always: repo.always === true,
     })),
     ...(values.name === undefined ? {} : { name: values.name }),
     preCreate: values.project?.["pre-create"] ?? [],
@@ -481,7 +482,10 @@ export function createProgram({ write, help, select }: ProgramHooks): Command {
     .usage("[options] <branch> [repo...] | <branch> --all")
     .argument("<branch>", "the branch of the project")
     // Optional for commander, so no repo and no `--all` opens our picker or gives `missing-argument`.
-    .argument("[repo...]", "the repos of the project; default: pick them")
+    .argument(
+      "[repo...]",
+      "the repos of the project; repos with always: true are added too; default: pick them",
+    )
     .option("--all", "use every repo of the codebase")
     .helpOption("-h, --help", "print this help")
     .action(() => select(projectCreate, create.args, create.opts()));

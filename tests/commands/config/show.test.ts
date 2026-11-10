@@ -114,6 +114,23 @@ describe("xr config show in a codebase", () => {
     expect(text.stdout).not.toContain("user-a");
   });
 
+  test("repos.<name>.always shows as true or false", async () => {
+    writeFile(
+      codebaseFile,
+      "repos:\n  meta:\n    always: true\n  web:\n    always: false\n",
+    );
+    const result = await json(["config", "show"]);
+    expect(result.code).toBe(0);
+    expect(
+      result.data.entries.filter(({ key }: { key: string }) =>
+        key.startsWith("repos."),
+      ),
+    ).toEqual([
+      { key: "repos.meta.always", value: "true", source: codebaseFile },
+      { key: "repos.web.always", value: "false", source: codebaseFile },
+    ]);
+  });
+
   test("the default projects-dir has the source default", async () => {
     writeFile(codebaseFile, "");
     expect((await json(["config", "show"])).data.entries).toEqual([

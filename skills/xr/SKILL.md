@@ -20,7 +20,8 @@ Run `xr` (crossrepo) for the user, read its JSON result, and act on it without a
 - When `ok` is `false`, `error` has `code`, `message`, `hint` and sometimes `details`. Show `message` and `hint` to the user.
 - Branch on `error.code`, never on the exit number.
 - Per-repo commands give `repos`: items `{repo, status, message, hint}`, where `status` is `ok`, `skipped`, `failed` or `conflict`. A conflict item also has `files`, and `stashKept` when the uncommitted changes stay in `git stash list`.
-- Doctor commands give `checks`: items `{id, status, message, fix}`. Show each item that is not `ok` with its `fix`.
+- Doctor commands give `checks`: items `{id, status, message, fix}`. Show each item that is not `ok` with its `fix`. `always-repo-missing` is a `warn`: the project lacks a repo that has `always: true` in the config. The user can leave such a repo out on purpose, so ask the user before you run its fix, which adds the repo.
+- `xr project create` also adds each repo that has `always: true` in the config, so `repos` can list repos the user did not name. With no repo names and no `--all`, it still fails with `missing-argument`. With repo names or `--all`, an `always` repo that is not on disk fails with `repos-not-ready`.
 - `leftovers` items `{what, path, command}` list what an undo could not remove. Show them; run a `command` only with the user's yes.
 - For error codes and the shape of each command's result, read [Output and errors](https://alexsuprun.github.io/crossrepo/output/).
 

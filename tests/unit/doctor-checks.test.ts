@@ -481,7 +481,7 @@ describe("projectDoctorChecks", () => {
     message,
   });
 
-  test("a healthy project: the 7 codebase checks then the 7 project checks, all ok", async () => {
+  test("a healthy project: the 7 codebase checks then the 8 project checks, all ok", async () => {
     const items = await projectItems();
     expect(items).toEqual(
       [...CODEBASE_CHECK_IDS, ...PROJECT_CHECK_IDS].map((id) => ({
@@ -496,11 +496,12 @@ describe("projectDoctorChecks", () => {
       "worktree-not-registered",
       "worktree-branch",
       "project-drift",
+      "always-repo-missing",
       "project-agents-md",
     ]);
   });
 
-  test("project-record: no branch is an error, checks 2 to 7 skipped, codebase checks still run", async () => {
+  test("project-record: no branch is an error, checks 2 to 8 skipped, codebase checks still run", async () => {
     writeRecord([`codebase: ${JSON.stringify(codebase)}`, "repos:", "  - api"]);
     const items = await projectItems();
     expect(items.slice(0, 7)).toEqual(
@@ -548,7 +549,7 @@ describe("projectDoctorChecks", () => {
     ]);
   });
 
-  test("codebase-path: a gone codebase is an error with the repair lines; codebase checks and 4, 5, 7 skipped; 3 and 6 run", async () => {
+  test("codebase-path: a gone codebase is an error with the repair lines; codebase checks and 4, 5, 7, 8 skipped; 3 and 6 run", async () => {
     const gone = join(iso.root, "gone");
     writeRecord([
       `branch: ${BRANCH}`,
@@ -581,6 +582,7 @@ describe("projectDoctorChecks", () => {
       skipped("worktree-not-registered", notFound),
       skipped("worktree-branch", notFound),
       { id: "project-drift", status: "ok" },
+      skipped("always-repo-missing", notFound),
       skipped("project-agents-md", notFound),
     ]);
   });
@@ -661,6 +663,28 @@ describe("projectDoctorChecks", () => {
         (item) => item.id === "codebase-path",
       ),
     ).toMatchObject({ status: "error", message: { path: plain } });
+  });
+
+  test("always-repo-missing: one warn per always repo not in the record, with the repo add fix", async () => {
+    writeConfig("    always: true");
+    expect(await projectItems("always-repo-missing")).toEqual([
+      {
+        id: "always-repo-missing",
+        status: "warn",
+        message: "web",
+        fix: "xr project repo add web --project feat",
+      },
+    ]);
+  });
+
+  test("always-repo-missing: ok when the record has every always repo", async () => {
+    writeFile(
+      join(codebase, ".crossrepo", "config.local.yaml"),
+      "repos:\n  api:\n    always: true\n  web:\n    always: false\n",
+    );
+    expect(await projectItems("always-repo-missing")).toEqual([
+      { id: "always-repo-missing", status: "ok" },
+    ]);
   });
 
   test("worktree-missing: one error per record repo with no folder", async () => {

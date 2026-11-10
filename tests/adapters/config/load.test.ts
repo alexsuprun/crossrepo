@@ -330,3 +330,56 @@ describe("config errors", () => {
     expect(loadError().kind).toBe("invalid");
   });
 });
+
+describe("repos.<name>.always", () => {
+  test("loads as a boolean, merges by level and shows as text", () => {
+    writeFile(
+      codebaseFile,
+      "repos:\n  meta:\n    remote: r\n    always: true\n",
+    );
+    writeFile(localFile, "repos:\n  web:\n    always: false\n");
+    const config = load();
+    expect(config.unknownKeys).toEqual([]);
+    expect(config.values.repos).toEqual({
+      meta: { remote: "r", always: true },
+      web: { always: false },
+    });
+    expect(entry(config, "repos.meta.always")).toEqual({
+      key: "repos.meta.always",
+      value: "true",
+      source: { kind: "file", path: codebaseFile },
+    });
+    expect(entry(config, "repos.web.always")?.value).toBe("false");
+  });
+
+  test("a local always: false turns off a codebase always: true", () => {
+    writeFile(codebaseFile, "repos:\n  meta:\n    always: true\n");
+    writeFile(localFile, "repos:\n  meta:\n    always: false\n");
+    const config = load();
+    expect(config.values.repos).toEqual({ meta: { always: false } });
+    expect(entry(config, "repos.meta.always")).toEqual({
+      key: "repos.meta.always",
+      value: "false",
+      source: { kind: "file", path: localFile },
+    });
+  });
+
+  test("a value that is not a boolean is invalid, naming the dotted key", () => {
+    writeFile(codebaseFile, 'repos:\n  meta:\n    always: "yes"\n');
+    const error = loadError();
+    expect(error.kind).toBe("invalid");
+    expect(error.message).toContain(codebaseFile);
+    expect(error.message).toContain("repos.meta.always");
+  });
+
+  test("a near miss gets always as the did-you-mean key", () => {
+    writeFile(codebaseFile, "repos:\n  meta:\n    alway: true\n");
+    expect(load().unknownKeys).toEqual([
+      {
+        key: "repos.meta.alway",
+        files: [codebaseFile],
+        suggestion: "repos.meta.always",
+      },
+    ]);
+  });
+});

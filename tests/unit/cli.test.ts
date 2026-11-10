@@ -543,19 +543,30 @@ describe("configView", () => {
     unknownKeys: [],
   };
 
-  test("lists the merged repos in config order with camelCase fields", () => {
+  test("lists the merged repos in config order with camelCase fields; always is false when not set", () => {
     const view = configView({
       ...base,
       values: {
         repos: {
-          web: { remote: "w", "default-branch": "trunk", description: "site" },
+          web: {
+            remote: "w",
+            "default-branch": "trunk",
+            description: "site",
+            always: true,
+          },
           api: { remote: "a" },
         },
       },
     });
     expect(view.repos).toEqual([
-      { name: "web", remote: "w", defaultBranch: "trunk", description: "site" },
-      { name: "api", remote: "a" },
+      {
+        name: "web",
+        remote: "w",
+        defaultBranch: "trunk",
+        description: "site",
+        always: true,
+      },
+      { name: "api", remote: "a", always: false },
     ]);
   });
 

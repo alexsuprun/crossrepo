@@ -17,7 +17,7 @@ The folder is found as for every command: the current folder, or the folder of `
 
 | Folder | What runs | `scope` |
 | --- | --- | --- |
-| A project folder, also one whose record is broken or whose codebase moved | [`xr project doctor`](../project-doctor/) for this project: the seven codebase checks, then the seven project checks, with the same `skipped` rules. | `project` |
+| A project folder, also one whose record is broken or whose codebase moved | [`xr project doctor`](../project-doctor/) for this project: the seven codebase checks, then the eight project checks, with the same `skipped` rules. | `project` |
 | A codebase folder | [`xr codebase doctor`](../codebase-doctor/): the seven codebase checks. | `codebase` |
 | Any other folder | Nothing. The command fails with `not-a-codebase`. | — |
 
@@ -51,6 +51,7 @@ project
 ✓ worktree-not-registered
 ✓ worktree-branch
 ✓ project-drift
+✓ always-repo-missing
 ✓ project-agents-md
 ```
 
@@ -94,6 +95,7 @@ With `--json`, stdout is one JSON object: the JSON of the command that runs, wit
     { "id": "worktree-not-registered", "status": "ok" },
     { "id": "worktree-branch", "status": "ok" },
     { "id": "project-drift", "status": "ok" },
+    { "id": "always-repo-missing", "status": "ok" },
     { "id": "project-agents-md", "status": "ok" }
   ]
 }

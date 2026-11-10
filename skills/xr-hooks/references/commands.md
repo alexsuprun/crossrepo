@@ -144,7 +144,8 @@ make a project folder with a worktree of each chosen repo on one branch
 
 Arguments:
   branch      the branch of the project
-  repo        the repos of the project; default: pick them
+  repo        the repos of the project; repos with always: true are added too;
+              default: pick them
 
 Options:
   --all       use every repo of the codebase

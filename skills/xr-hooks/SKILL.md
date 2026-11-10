@@ -51,7 +51,8 @@ All 4 hooks are lists under `project:`. `pre-` hooks check, `post-` hooks do the
 
 ## 4. Use only these variables
 
-- The 7 built-in vars: `CROSSREPO_HOOK`, `CROSSREPO_CODEBASE_PATH`, `CROSSREPO_CODEBASE_NAME`, `CROSSREPO_PROJECT_PATH`, `CROSSREPO_PROJECT_NAME`, `CROSSREPO_PROJECT_BRANCH`, `CROSSREPO_PROJECT_REPOS` (one repo per line).
+- The 7 built-in vars: `CROSSREPO_HOOK`, `CROSSREPO_CODEBASE_PATH`, `CROSSREPO_CODEBASE_NAME`, `CROSSREPO_PROJECT_PATH`, `CROSSREPO_PROJECT_NAME`, `CROSSREPO_PROJECT_BRANCH`, `CROSSREPO_PROJECT_REPOS` (one repo per line; it includes the repos with `always: true` that `xr project create` added).
+- Do not write a `post-create` hook that links or adds a shared repo to each project. Set `always: true` on that repo instead: a hook cannot add a repo, because an `xr` command started by a hook fails with `lock-held`.
 - Each `project.vars` entry, under its exact name.
 - In `pre-create` and `post-remove`, the project folder and the worktrees do not exist.
 - Never give a `project.vars` entry a name that starts with `CROSSREPO_`, in any case. That is the error `reserved-var-name`.

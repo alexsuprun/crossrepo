@@ -179,6 +179,26 @@ describe("createPrompt pickMany", () => {
     expect(terminal.written()).toContain("Pick the repo to remove");
   });
 
+  test("initial choices start marked: Enter gives them, Space unmarks one", async () => {
+    const marked = fakeTerminal({ interactive: true, keys: [ENTER] });
+    expect(
+      await marked.prompt.pickMany({
+        ...request(["api", "web", "db"]),
+        initial: ["web", "db"],
+      }),
+    ).toEqual(["web", "db"]);
+    const unmarked = fakeTerminal({
+      interactive: true,
+      keys: [DOWN, SPACE, ENTER],
+    });
+    expect(
+      await unmarked.prompt.pickMany({
+        ...request(["api", "web", "db"]),
+        initial: ["web", "db"],
+      }),
+    ).toEqual(["db"]);
+  });
+
   test("at least one is needed: Enter with none marked does not end the picker", async () => {
     const terminal = fakeTerminal({
       interactive: true,

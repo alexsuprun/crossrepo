@@ -37,6 +37,7 @@ To see the merged result and the file that gives each value, run [xr config show
 | `repos.<name>.remote` | The URL of the repo. `xr codebase clone` clones it, exactly as written. |
 | `repos.<name>.default-branch` | The branch that new project branches start from and that `xr project sync` merges. When it is not set, `xr` uses the branch that `origin/HEAD` points to. |
 | `repos.<name>.description` | A short text about the repo. `xr` puts it in `AGENTS.md` and shows it in the repo lists. |
+| `repos.<name>.always` | `true` or `false`; not set is `false`. With `true`, [`xr project create`](../../commands/project-create/#repos-in-every-project) adds the repo to each new project, also when you do not name it, and the picker shows it as already marked. Use it for a shared repo, such as one with specs, docs or helper scripts. `xr codebase init` and `xr codebase repo add` never write it; add it by hand. `always: false` in `config.local.yaml` (or the user config) turns off an `always: true` of the codebase config. |
 | `project.pre-create` | A list of shell commands to run in `xr project create` before it makes anything. See the [hooks guide](../hooks/). |
 | `project.post-create` | A list of shell commands to run after `xr project create`. See the [hooks guide](../hooks/). |
 | `project.pre-remove` | A list of shell commands to run before `xr project remove` deletes anything. See the [hooks guide](../hooks/). |
@@ -47,7 +48,7 @@ The `repos:` list decides which repos the codebase has. A repo folder that is no
 
 Every key can go in every level. For example, a user config can set `projects-dir` for all your codebases.
 
-A value with the wrong type is the error `invalid-config`, and the message names the file and the key. A key that `xr` does not know gives the warning `unknown-config-key` with a "did you mean" hint, and the command still runs.
+A value with the wrong type is the error `invalid-config`, for example `always: "yes"`, and the message names the file and the key. A key that `xr` does not know gives the warning `unknown-config-key` with a "did you mean" hint, and the command still runs.
 
 A codebase config looks like this:
 
@@ -62,6 +63,11 @@ repos:
     remote: git@github.com:acme/web.git
     default-branch: main
     description: Frontend
+  specs:
+    remote: git@github.com:acme/specs.git
+    default-branch: main
+    description: Specs and docs
+    always: true
 project:
   post-create:
     - npm ci
