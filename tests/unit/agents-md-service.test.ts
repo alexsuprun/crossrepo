@@ -123,10 +123,10 @@ const CODEBASE_TEXT = [
   "",
 ].join("\n");
 const CONFIG = [
-  { name: "docs", description: "Docs" },
-  { name: "web", description: "" },
-  { name: "api", description: "The HTTP API" },
-  { name: "cli" },
+  { name: "docs", description: "Docs", always: false },
+  { name: "web", description: "", always: false },
+  { name: "api", description: "The HTTP API", always: false },
+  { name: "cli", always: false },
 ];
 
 describe("projectAgentsText", () => {

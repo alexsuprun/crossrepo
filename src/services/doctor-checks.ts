@@ -36,6 +36,7 @@ export const PROJECT_CHECK_IDS = [
   "worktree-not-registered",
   "worktree-branch",
   "project-drift",
+  "always-repo-missing",
   "project-agents-md",
 ] as const;
 
@@ -166,6 +167,9 @@ export async function projectDoctorChecks(
         fix: `move \`${folder}\` out of the project folder`,
       }),
     ),
+    "always-repo-missing": found
+      ? alwaysRepoMissingProblems(ctx, project, record)
+      : "skipped",
     "project-agents-md": found
       ? projectAgentsProblems(ctx, project, recordCodebase, record)
       : "skipped",
@@ -386,6 +390,22 @@ function projectAgentsProblems(
   return problems;
 }
 
+/** A warn for each `always: true` repo of the config that the project does not have. */
+function alwaysRepoMissingProblems(
+  ctx: CheckCtx,
+  project: string,
+  record: ProjectRecord,
+): Problem[] {
+  const name = basename(project);
+  return ctx.config.repos
+    .filter((repo) => repo.always && !record.repos.includes(repo.name))
+    .map(({ name: repo }) => ({
+      status: "warn",
+      message: repo,
+      fix: `xr project repo add ${repo} --project ${name}`,
+    }));
+}
+
 /**
  * The merged repos, then the keys of the codebase file with a null value, which
  * the merged config drops (`web:` with nothing under it).
@@ -398,7 +418,7 @@ function configuredRepos(ctx: CheckCtx, codebase: string): ConfigRepoView[] {
     ...merged,
     ...repoKeys(text)
       .filter((name) => !names.has(name))
-      .map((name) => ({ name })),
+      .map((name) => ({ name, always: false })),
   ];
 }
 

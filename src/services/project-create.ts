@@ -43,7 +43,9 @@ export const CLONE_HINT = "xr codebase clone";
 /**
  * The argument checks of `xr project create`, then the repo picker when no repo
  * and no `--all` is given. Runs before the transaction, so no lock is held
- * while the user picks. Changes nothing.
+ * while the user picks. Changes nothing. The `always` repos join named repos
+ * and start marked in the picker. Their on-disk check runs after the picker,
+ * so that with no picker the error stays `missing-argument`.
  */
 export async function createPlan(
   ctx: Pick<Ctx, "fs" | "config" | "prompt">,
@@ -66,11 +68,13 @@ export async function createPlan(
   const states = ctx.config.repos.map((repo) =>
     repoState(ctx.fs, codebase, repo),
   );
+  const always = states.filter((state) => state.always);
   if (!all && names.length === 0) {
     const picked = await ctx.prompt.pickMany({
       argument: "repos",
       message: "Pick the repos of the project",
       choices: states.filter((state) => state.present).map(({ name }) => name),
+      initial: always.filter((s) => s.present).map(({ name }) => name),
       missing: "Give the repos of the project, or `--all`.",
       listLabel: "Repos",
       hint: "xr project create <branch> <repo>... | --all",
@@ -79,10 +83,11 @@ export async function createPlan(
         hint: CLONE_HINT,
       },
     });
+    checkReposOnDisk(always);
     return { branch, repos: picked };
   }
   checkKnownRepos(states, names);
-  const wanted = new Set(names);
+  const wanted = new Set([...names, ...always.map(({ name }) => name)]);
   const chosen = all ? states : states.filter(({ name }) => wanted.has(name));
   if (chosen.length === 0) {
     throw new XrError({

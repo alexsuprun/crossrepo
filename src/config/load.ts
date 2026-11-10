@@ -43,7 +43,7 @@ export interface LoadConfigOptions {
   codebase?: string;
 }
 
-type Tree = { [key: string]: Tree | string | string[] };
+type Tree = { [key: string]: Tree | string | string[] | boolean };
 
 /**
  * Reads the user, codebase and local levels, in that order. A later level wins,
@@ -182,7 +182,9 @@ function dropNulls(value: object): Tree {
   const tree: Tree = {};
   for (const [key, item] of Object.entries(value)) {
     if (item === null || item === undefined) continue;
-    tree[key] = isMap(item) ? dropNulls(item) : (item as string | string[]);
+    tree[key] = isMap(item)
+      ? dropNulls(item)
+      : (item as string | string[] | boolean);
   }
   return tree;
 }
@@ -196,12 +198,17 @@ function mergeTrees(base: Tree, top: Tree): Tree {
   return merged;
 }
 
-/** Every leaf of `tree` in dotted form. A list is one leaf. */
+/** Every leaf of `tree` in dotted form. A list is one leaf; a boolean becomes `true` or `false`. */
 function leaves(tree: Tree, prefix = ""): [string, string | string[]][] {
   return Object.entries(tree).flatMap(([key, value]) =>
     isMap(value)
       ? leaves(value, `${prefix}${key}.`)
-      : [[`${prefix}${key}`, value] as [string, string | string[]]],
+      : [
+          [
+            `${prefix}${key}`,
+            typeof value === "boolean" ? String(value) : value,
+          ] as [string, string | string[]],
+        ],
   );
 }
 

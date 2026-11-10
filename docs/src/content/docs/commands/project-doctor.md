@@ -27,7 +27,7 @@ In a project folder whose record gives no codebase, a `<project>` argument fails
 
 ## What it does
 
-The command first runs the seven checks of [`xr codebase doctor`](../codebase-doctor/#checks) on the codebase of the project, then the seven project checks below, always in this order. A check with no problem gives one `ok` item. A check with problems gives one item per problem, each with a message and a fix. A check that needs data an earlier check could not get is `skipped` (see [Skipped checks](#skipped-checks)).
+The command first runs the seven checks of [`xr codebase doctor`](../codebase-doctor/#checks) on the codebase of the project, then the eight project checks below, always in this order. A check with no problem gives one `ok` item. A check with problems gives one item per problem, each with a message and a fix. A check that needs data an earlier check could not get is `skipped` (see [Skipped checks](#skipped-checks)).
 
 The command only reads. It takes no lock, writes no file, and every git call only reads: `git worktree list --porcelain` in the codebase repos, and a read of the current branch of each worktree. It never runs `git worktree repair` or `git worktree prune` for you.
 
@@ -43,6 +43,7 @@ A config that cannot load, for example a file with invalid YAML, still fails bef
 | `worktree-not-registered` | `error` | A worktree folder that is not a worktree of its repo in the codebase (for example after you moved the project folder), or whose git cannot be read (for example after the codebase moved). | The worktree path. | `git -C "<codebase>/<repo>" worktree repair "<worktree path>"`. On git older than 2.29, the first line is `needs git 2.29 or newer (you have <version>):`. |
 | `worktree-branch` | `warn` | A worktree on another branch than the record `branch`, or with a detached HEAD. | The worktree path, the branch it is on (or `detached HEAD`), and that `xr project sync` refuses this worktree. | `git -C "<worktree path>" switch <branch>` |
 | `project-drift` | `error` | A folder in the project folder that is not a repo of the record. | The folder name. | ``move `<folder>` out of the project folder`` |
+| `always-repo-missing` | `warn` | A repo with `always: true` in the config that is not a repo of the record: a project made before the key was set, or one where you unmarked the repo in the picker or removed it with `xr project repo remove`. When you left the repo out on purpose, you can ignore this warn. | The repo name. | `xr project repo add <repo> --project <project>`, with the project folder name. |
 | `project-agents-md` | `warn` | The project `AGENTS.md` is missing, or does not match the repos. | See below. | See below. |
 
 Some details:
@@ -61,8 +62,8 @@ Some details:
 
 A `skipped` item has the message why, and no fix.
 
-- When `project-record` fails, the project checks 2 to 7 are `skipped` with `project record cannot be read`. The codebase checks still run when the codebase was found, for example when the record has a valid `codebase` but no `branch`. Otherwise they are `skipped` with the same message.
-- When `codebase-path` fails, the seven codebase checks and `worktree-not-registered`, `worktree-branch` and `project-agents-md` are `skipped` with `codebase not found`. `worktree-missing` and `project-drift` still run.
+- When `project-record` fails, the project checks 2 to 8 are `skipped` with `project record cannot be read`. The codebase checks still run when the codebase was found, for example when the record has a valid `codebase` but no `branch`. Otherwise they are `skipped` with the same message.
+- When `codebase-path` fails, the seven codebase checks and `worktree-not-registered`, `worktree-branch`, `always-repo-missing` and `project-agents-md` are `skipped` with `codebase not found`. `worktree-missing` and `project-drift` still run.
 
 ## Exit code
 
@@ -89,6 +90,7 @@ On success stdout gets the project folder, an empty line, then one line per item
 ! worktree-branch  /work/shop/.projects/feat--login/api: on branch `main`, not `feat/login`; `xr project sync` refuses this worktree
     fix: git -C "/work/shop/.projects/feat--login/api" switch feat/login
 ✓ project-drift
+✓ always-repo-missing
 ✓ project-agents-md
 ```
 
@@ -124,6 +126,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute project fold
     { "id": "worktree-not-registered", "status": "ok" },
     { "id": "worktree-branch", "status": "ok" },
     { "id": "project-drift", "status": "ok" },
+    { "id": "always-repo-missing", "status": "ok" },
     { "id": "project-agents-md", "status": "ok" }
   ]
 }
@@ -155,6 +158,7 @@ On a failure, `project` and `checks` sit next to `error`. Here the codebase move
     { "id": "worktree-not-registered", "status": "skipped", "message": "codebase not found" },
     { "id": "worktree-branch", "status": "skipped", "message": "codebase not found" },
     { "id": "project-drift", "status": "ok" },
+    { "id": "always-repo-missing", "status": "skipped", "message": "codebase not found" },
     { "id": "project-agents-md", "status": "skipped", "message": "codebase not found" }
   ],
   "error": {

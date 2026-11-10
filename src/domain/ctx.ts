@@ -69,6 +69,8 @@ export interface ConfigRepoView {
   remote?: string;
   defaultBranch?: string;
   description?: string;
+  /** `repos.<name>.always`: `xr project create` adds the repo to a new project. False when not set. */
+  always: boolean;
 }
 
 /** File and folder I/O. Every write goes through `writeFileAtomic`. */
@@ -202,6 +204,8 @@ export interface PickRequest {
   choices: readonly string[];
   /** A muted text shown next to a choice, by choice value. */
   hints?: Readonly<Record<string, string>>;
+  /** The choices that start marked; only `pickMany` reads it. */
+  initial?: readonly string[];
   /** The start of the error message when there is no picker. */
   missing: string;
   /** The word before the list of choices in that message, e.g. `Choices`. */

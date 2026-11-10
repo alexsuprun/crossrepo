@@ -62,7 +62,7 @@ Each line gets your environment plus these 7 variables:
 | `CROSSREPO_PROJECT_PATH` | The project folder. In `pre-create` it is the folder that `xr` will make, and it does not exist yet. In `post-remove` it is the folder that was just removed. |
 | `CROSSREPO_PROJECT_NAME` | The project folder name, such as `feat--login`. |
 | `CROSSREPO_PROJECT_BRANCH` | The branch, such as `feat/login`. |
-| `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line. |
+| `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line. These include the repos with `always: true` that `xr project create` added, see [Repos in every project](../../commands/project-create/#repos-in-every-project). |
 | `CROSSREPO_HOOK` | The hook that runs: `pre-create`, `post-create`, `pre-remove` or `post-remove`. |
 
 The folder of a repo in the codebase is `$CROSSREPO_CODEBASE_PATH/<repo>`, and its worktree is `$CROSSREPO_PROJECT_PATH/<repo>`. In `pre-create` and `post-remove`, the worktrees do not exist.

@@ -36,6 +36,7 @@ const PROJECT_IDS = [
   "worktree-not-registered",
   "worktree-branch",
   "project-drift",
+  "always-repo-missing",
   "project-agents-md",
 ];
 const ALL_OK = [...CODEBASE_IDS, ...PROJECT_IDS].map((id) => ({
@@ -57,7 +58,7 @@ const itemsOf = (data: { checks: Item[] }, id: string) =>
   data.checks.filter((item) => item.id === id);
 
 describe("xr project doctor: the project", () => {
-  test("a healthy project in its folder: the project path and 14 ok items, exit 0", async () => {
+  test("a healthy project in its folder: the project path and 15 ok items, exit 0", async () => {
     const result = await t.json(DOCTOR, { cwd: env.login });
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
@@ -266,6 +267,23 @@ describe("xr project doctor: problems", () => {
     ]);
   });
 
+  test("an always repo the project lacks: always-repo-missing warn with the repo add fix, exit 0", async () => {
+    writeFile(
+      join(env.codebase, ".crossrepo", "config.local.yaml"),
+      "repos:\n  api:\n    always: true\n  web:\n    always: true\n",
+    );
+    const result = await t.json(DOCTOR, { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(itemsOf(result.data, "always-repo-missing")).toEqual([
+      {
+        id: "always-repo-missing",
+        status: "warn",
+        message: "web",
+        fix: "xr project repo add web --project feat--login",
+      },
+    ]);
+  });
+
   test("AGENTS.md drift: a stray heading and a missing repo heading are two warns, exit 0", async () => {
     const text = readFileSync(join(env.login, "AGENTS.md"), "utf8");
     writeFileSync(
@@ -290,7 +308,7 @@ describe("xr project doctor: problems", () => {
     ]);
   });
 
-  test("a record without branch: project-record error, 2 to 7 skipped, codebase checks run", async () => {
+  test("a record without branch: project-record error, 2 to 8 skipped, codebase checks run", async () => {
     writeFileSync(
       recordFile(),
       t
@@ -331,7 +349,7 @@ describe("xr project doctor: problems", () => {
     const skipped = result.data.checks.filter(
       (item: Item) => item.status === "skipped",
     );
-    expect(skipped).toHaveLength(13);
+    expect(skipped).toHaveLength(14);
     expect(
       skipped.every(
         (item: Item) => item.message === "project record cannot be read",
@@ -340,7 +358,7 @@ describe("xr project doctor: problems", () => {
     expect(itemsOf(result.data, "project-record")[0]?.status).toBe("error");
   });
 
-  test("a moved codebase: codebase-path error with the repair lines; codebase checks and 4, 5, 7 skipped; 3 and 6 run", async () => {
+  test("a moved codebase: codebase-path error with the repair lines; codebase checks and 4, 5, 7, 8 skipped; 3 and 6 run", async () => {
     const moved = join(env.iso.root, "shop-moved");
     const gone = env.codebase;
     renameSync(gone, moved);
@@ -376,6 +394,7 @@ describe("xr project doctor: problems", () => {
       { id: "worktree-not-registered", status: "skipped", message: notFound },
       { id: "worktree-branch", status: "skipped", message: notFound },
       { id: "project-drift", status: "ok" },
+      { id: "always-repo-missing", status: "skipped", message: notFound },
       { id: "project-agents-md", status: "skipped", message: notFound },
     ]);
   });
