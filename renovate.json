@@ -16,6 +16,13 @@
       "allowedVersions": "<23"
     },
     {
+      "description": "Workflow jobs pinned to Node 22.13 test the floor in engines.node; change them by hand when engines.node is raised.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["node"],
+      "matchCurrentValue": "22.13",
+      "enabled": false
+    },
+    {
       "matchPackageNames": ["bun", "@types/bun"],
       "groupName": "bun"
     },

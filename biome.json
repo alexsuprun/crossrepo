@@ -13,6 +13,11 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {

@@ -282,13 +282,23 @@ describe(".github/workflows/ci.yml", () => {
       expect(job?.["runs-on"]).toBe("ubuntu-latest");
     });
 
-    test("caches the git 2.27.0 build with a key on the version", () => {
-      const cache = (job?.steps ?? []).find((step) =>
-        step.uses?.startsWith("actions/cache@"),
+    // A source build of git 2.27.0 does not compile against the libcurl of newer runners.
+    test("installs the Ubuntu git 2.27.0 package, checked by sha256, with no source build", () => {
+      const install = runs(job).find((run) =>
+        run.includes("git_2.27.0-1ubuntu1.1_amd64.deb"),
       );
-      expect(cache?.uses).toMatch(/^actions\/cache@[0-9a-f]{40}$/);
-      expect(String(cache?.with?.key)).toContain("2.27.0");
-      expect(String(cache?.with?.path)).toContain("git-2.27");
+      expect(install).toContain(
+        "https://old-releases.ubuntu.com/ubuntu/pool/main/g/git/",
+      );
+      expect(install).toMatch(/sha256sum -c/);
+      expect(install).toContain("dpkg -x");
+      expect(runs(job).some((run) => run.includes("make "))).toBe(false);
+    });
+
+    test("sets GIT_EXEC_PATH to the unpacked git-core before the version check", () => {
+      const execPath = indexOfRun(job, "GIT_EXEC_PATH=");
+      expect(execPath).toBeGreaterThanOrEqual(0);
+      expect(execPath).toBeLessThan(indexOfRun(job, "git version 2.27.0"));
     });
 
     test("checks git --version is 2.27.0, then runs test:commands and test:smoke", () => {

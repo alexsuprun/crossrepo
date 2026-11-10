@@ -112,7 +112,7 @@ jobs:
           no-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22.23"
+          node-version: "22.13"
           package-manager-cache: false
           check-latest: true
       - run: node --version
@@ -138,28 +138,23 @@ jobs:
           no-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "22.23"
+          node-version: "22.13"
           package-manager-cache: false
           check-latest: true
-      # The build links to the shared libs of this Ubuntu release, so the release is in the key.
-      - name: Read the Ubuntu release
-        id: os
-        run: echo "release=$(lsb_release -rs)" >> "$GITHUB_OUTPUT"
-      - name: Cache the git 2.27.0 build
-        id: git-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/git-2.27
-          key: git-2.27.0-ubuntu-${{ steps.os.outputs.release }}-${{ runner.arch }}
-      - name: Build git 2.27.0 from source
-        if: steps.git-cache.outputs.cache-hit != 'true'
+      # git 2.27.0 from Ubuntu 20.10: its source does not compile against the libcurl of newer runners.
+      - name: Install git 2.27.0 from the Ubuntu package
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-gnutls-dev libexpat1-dev libssl-dev zlib1g-dev gettext
-          curl -fsSL https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.27.0.tar.xz | tar -xJ -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/git-2.27.0" -j"$(nproc)" prefix="$HOME/git-2.27" NO_TCLTK=1 all install
+          sudo apt-get install -y libcurl3t64-gnutls libexpat1 libpcre2-8-0 zlib1g liberror-perl
+          deb="$RUNNER_TEMP/git_2.27.0-1ubuntu1.1_amd64.deb"
+          curl -fsSL -o "$deb" https://old-releases.ubuntu.com/ubuntu/pool/main/g/git/git_2.27.0-1ubuntu1.1_amd64.deb
+          echo "602513654eb77e4c30bceabaedc6f36f359dc1bf3b70eb292e282b26e5e88db8  $deb" | sha256sum -c
+          dpkg -x "$deb" "$HOME/git-2.27"
       - name: Put git 2.27.0 first on PATH
-        run: echo "$HOME/git-2.27/bin" >> "$GITHUB_PATH"
+        run: |
+          echo "$HOME/git-2.27/usr/bin" >> "$GITHUB_PATH"
+          echo "GIT_EXEC_PATH=$HOME/git-2.27/usr/lib/git-core" >> "$GITHUB_ENV"
+          echo "GIT_TEMPLATE_DIR=$HOME/git-2.27/usr/share/git-core/templates" >> "$GITHUB_ENV"
       - name: Check the git version
         run: |
           git --version
