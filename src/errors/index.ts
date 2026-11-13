@@ -30,6 +30,7 @@ export const ERROR_CODES = [
   "sh-not-found",
   "project-not-found",
   "uncommitted-changes",
+  "programs-still-running",
   "project-drift",
   "branch-not-merged",
   "repo-already-in-project",

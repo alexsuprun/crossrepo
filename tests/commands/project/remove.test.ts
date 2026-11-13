@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
@@ -12,6 +14,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import * as gitAdapter from "../../../src/adapters/git/index.ts";
 import * as hooksAdapter from "../../../src/adapters/hooks/index.ts";
+import * as processesAdapter from "../../../src/adapters/processes/index.ts";
 import * as promptAdapter from "../../../src/adapters/prompt/index.ts";
 import { main } from "../../../src/cli/index.ts";
 import { renderCodebaseConfig } from "../../../src/domain/codebase-config.ts";
@@ -528,6 +531,185 @@ describe("xr project remove: refused, nothing changes", () => {
     expect(result.code).toBe(1);
     expect(result.data.error.code).toBe("lock-held");
     expect(state()).toEqual(before);
+  });
+});
+
+/**
+ * Makes `createProcesses` give `list()` for the rest of the test; `null` acts
+ * as Windows or no `lsof`. Returns how many times `cwds` ran.
+ */
+function fakeProcesses(
+  list: (self: number) => processesAdapter.ProcessCwd[] | null,
+): { calls: number } {
+  const counter = { calls: 0 };
+  const real = processesAdapter.createProcesses;
+  spies.push(
+    spyOn(processesAdapter, "createProcesses").mockImplementation((options) => {
+      const { self } = real(options);
+      return {
+        self,
+        cwds: async () => {
+          counter.calls += 1;
+          return list(self);
+        },
+      };
+    }),
+  );
+  return counter;
+}
+
+describe("xr project remove: programs running in the worktrees", () => {
+  const real = (...parts: string[]) => join(realpathSync(login), ...parts);
+  const vite = () => ({
+    pid: 4242,
+    ppid: 1,
+    command: "node",
+    cwd: real("web", "app"),
+  });
+  const codes = (result: { data: { warnings: { code: string }[] } }) =>
+    result.data.warnings.map((w) => w.code);
+
+  test("a program in a worktree: removed, a programs-still-running warning lists it", async () => {
+    fakeProcesses(() => [vite()]);
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(state()).toEqual(removedState());
+    expect(codes(result)).toEqual(["programs-still-running"]);
+    const [warning] = result.data.warnings;
+    expect(warning.message).toContain("feat--login");
+    expect(warning.lines).toEqual([`4242 node  ${join("web", "app")}`]);
+    expect(warning.hint).toContain("Stop");
+  });
+
+  test("--force: the same warning, the project is removed", async () => {
+    const counter = fakeProcesses(() => [vite()]);
+    writeFile(join(login, "api", "dirty.txt"), "x\n");
+    const result = await json([...REMOVE, "feat--login", "--force"]);
+    expect(result.code).toBe(0);
+    expect(counter.calls).toBe(1);
+    expect(state()).toEqual(removedState());
+    expect(codes(result)).toEqual(["programs-still-running"]);
+  });
+
+  test("xr cannot tell (Windows, no lsof): removed, no warning", async () => {
+    const counter = fakeProcesses(() => null);
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(counter.calls).toBe(1);
+    expect(state()).toEqual(removedState());
+    expect(result.data.warnings).toEqual([]);
+  });
+
+  test("processes at the project root or in a sibling folder do not count", async () => {
+    fakeProcesses(() => [
+      { pid: 7, ppid: 1, command: "Code", cwd: realpathSync(login) },
+      { pid: 8, ppid: 1, command: "node", cwd: `${real("web")}-old` },
+    ]);
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([]);
+  });
+
+  test("xr and its ancestors in a worktree do not count", async () => {
+    fakeProcesses((self) => [
+      { pid: 500, ppid: 1, command: "zsh", cwd: real("api") },
+      { pid: self, ppid: 500, command: "xr", cwd: real("api") },
+    ]);
+    const result = await json(
+      ["--codebase-path", codebase, ...REMOVE, "feat--login"],
+      { cwd: join(login, "api") },
+    );
+    expect(result.code).toBe(0);
+    expect(existsSync(login)).toBe(false);
+    expect(result.data.warnings).toEqual([]);
+  });
+
+  test("a missing worktree folder is not checked", async () => {
+    const cwd = real("api");
+    rmSync(join(login, "api"), { recursive: true });
+    fakeProcesses(() => [{ pid: 9, ppid: 1, command: "node", cwd }]);
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([]);
+  });
+
+  test("a failed check (uncommitted changes): no scan, no warning", async () => {
+    const counter = fakeProcesses(() => [vite()]);
+    writeFile(join(login, "api", "a.txt"), "1\n");
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.data.error.code).toBe("uncommitted-changes");
+    expect(counter.calls).toBe(0);
+  });
+
+  test("text mode: the warning shows one line for each program", async () => {
+    fakeProcesses(() => [vite()]);
+    const result = await run([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain(`4242 node  ${join("web", "app")}`);
+  });
+
+  test.skipIf(process.platform === "win32" || !Bun.which("lsof"))(
+    "a real program in a worktree: removed, the warning has its pid",
+    async () => {
+      const child = spawn("sleep", ["30"], {
+        cwd: join(login, "web"),
+        stdio: "ignore",
+      });
+      try {
+        const result = await json([...REMOVE, "feat--login"]);
+        expect(result.code).toBe(0);
+        expect(existsSync(login)).toBe(false);
+        expect(result.data.warnings[0].lines).toContain(
+          `${child.pid} sleep  web`,
+        );
+      } finally {
+        child.kill();
+      }
+    },
+  );
+});
+
+describe("xr project remove: a program writes while git deletes", () => {
+  /** Acts like git when a program writes a file during the delete. */
+  function racingGit(g: gitAdapter.Git): gitAdapter.Git {
+    return {
+      ...g,
+      async worktreeRemove(dir, path, options) {
+        await g.worktreeRemove(dir, path, options);
+        writeFile(join(path, "node_modules", ".vite", "x.json"), "{}\n");
+        throw new GitError({
+          args: ["-C", dir, "worktree", "remove", "--force", path],
+          exitCode: 255,
+          stderr: `error: failed to delete '${path}': Directory not empty\n`,
+        });
+      },
+    };
+  }
+
+  test("Directory not empty: xr deletes the rest and prunes, the remove succeeds", async () => {
+    fakeGit(racingGit);
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(0);
+    expect(state()).toEqual(removedState());
+    expect(worktreePaths("web")).toEqual([join(codebase, "web")]);
+  });
+
+  test("another git failure still stops the remove", async () => {
+    fakeGit((g) =>
+      withFault(
+        g,
+        "worktreeRemove",
+        1,
+        new GitError({
+          args: ["worktree"],
+          exitCode: 128,
+          stderr: "fatal: locked\n",
+        }),
+      ),
+    );
+    const result = await json([...REMOVE, "feat--login"]);
+    expect(result.code).toBe(1);
+    expect(result.data.error.message).toContain("locked");
   });
 });
 

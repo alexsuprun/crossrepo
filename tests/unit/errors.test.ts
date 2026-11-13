@@ -53,6 +53,7 @@ describe("ERROR_CODES", () => {
       "sh-not-found",
       "project-not-found",
       "uncommitted-changes",
+      "programs-still-running",
       "project-drift",
       "repo-already-in-project",
       "last-repo",

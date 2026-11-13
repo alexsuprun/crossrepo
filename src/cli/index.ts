@@ -4,6 +4,7 @@ import { createFs } from "../adapters/fs/index.ts";
 import { createGit } from "../adapters/git/index.ts";
 import { createHooks } from "../adapters/hooks/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
+import { createProcesses } from "../adapters/processes/index.ts";
 import { createMultiPrompt, createPrompt } from "../adapters/prompt/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseDoctor } from "../commands/codebase/doctor.ts";
@@ -272,6 +273,7 @@ async function runCommand(
     stepDelayMs: stepDelay(env.XR_TEST_STEP_DELAY_MS),
     // Hook output goes to stderr in every mode, so stdout keeps only the Report (AD-4).
     hooks: createHooks({ platform, env, write: stderr }),
+    processes: createProcesses({ platform }),
     env,
     platform,
     now,

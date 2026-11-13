@@ -248,6 +248,23 @@ export interface CtxHooks {
   }): Promise<HookResult>;
 }
 
+/** One running process and its current folder, symlinks resolved. */
+export interface ProcessCwd {
+  pid: number;
+  /** 0 when not known. */
+  ppid: number;
+  command: string;
+  cwd: string;
+}
+
+/** The processes adapter: reads which processes run where. Never signals a process. */
+export interface CtxProcesses {
+  /** The pid of this `xr` process. */
+  readonly self: number;
+  /** Every visible process with its current folder, or `null` when xr cannot tell (Windows, no `lsof`). */
+  cwds(signal?: AbortSignal): Promise<ProcessCwd[] | null>;
+}
+
 /** The one plain object `cli` builds for each run (AD-1). Commands do all I/O through it. */
 export interface Ctx {
   out: { emit(event: LiveEvent): void };
@@ -267,6 +284,7 @@ export interface Ctx {
   /** Test only (`XR_TEST_STEP_DELAY_MS`): the runner waits this long after each step. */
   stepDelayMs?: number;
   hooks: CtxHooks;
+  processes: CtxProcesses;
   /** The env `xr` got; hooks inherit it. */
   env: Readonly<Record<string, string | undefined>>;
   /** `process.platform`, or a fixed one in tests. */
