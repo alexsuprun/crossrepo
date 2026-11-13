@@ -3,7 +3,7 @@ title: xr project remove
 description: Remove the worktrees and the folder of a project between the pre-remove and post-remove hooks, keep the branches, and never lose uncommitted work by mistake.
 ---
 
-`xr project remove` deletes a project when its work is done. It removes the git worktree of each repo and then the project folder. Before that, it checks that no uncommitted work would be lost and runs your `pre-remove` hook. After the project is gone, it runs your `post-remove` hook. It keeps the branches, unless you give `--delete-branch`.
+`xr project remove` deletes a project when its work is done. It removes the git worktree of each repo and then the project folder. Before that, it checks that no uncommitted work would be lost and that no program runs in a worktree, and runs your `pre-remove` hook. After the project is gone, it runs your `post-remove` hook. It keeps the branches, unless you give `--delete-branch`.
 
 ```sh
 xr project remove <project>
@@ -19,7 +19,7 @@ It works in a codebase folder or in a project folder, or with `--codebase-path <
 | Argument or option | What it does |
 | --- | --- |
 | `<project>` | The project to remove: its folder name, such as `feat--login`, or its branch, such as `feat/login`. The folder name is tried first. |
-| `--force` | Remove the worktrees even when they have uncommitted changes. It skips only that check. It never skips the drift check or the `pre-remove` hook, and it never deletes an unmerged branch. |
+| `--force` | Remove the worktrees even when they have uncommitted changes. It skips only this check. It never skips the drift check or the `pre-remove` hook, and it never deletes an unmerged branch. |
 | `--delete-branch` | After each worktree is removed, delete its branch with `git branch -d`. A branch that is not merged stays. |
 
 A project record that is not valid is a warning `invalid-project-record`, and that project is skipped. So the remove of another project goes on, and a project whose own record is not valid is not found (`project-not-found`).
@@ -85,7 +85,7 @@ With `--json`, the same warning is in `warnings`. See [Warning codes](#errors). 
 
 When every check passes, the delete phase runs these steps in this order:
 
-1. **Remove worktree `<repo>`**, one step per repo, in record order: `git worktree remove --force`. This is safe, because the check phase found no uncommitted changes, or you gave `--force`. When the worktree folder is missing, the step runs `git worktree prune` in that repo instead, and its step line says `(worktree folder missing)`.
+1. **Remove worktree `<repo>`**, one step per repo, in record order: `git worktree remove --force`. This is safe, because the check phase found no uncommitted changes, or you gave `--force`. A program that runs in the worktree, such as a dev server, can write a file while git deletes the folder. Then git fails with `Directory not empty`, and `xr` deletes the rest of the folder and runs `git worktree prune`. When the worktree folder is missing, the step runs `git worktree prune` in that repo instead, and its step line says `(worktree folder missing)`.
 2. **Delete branch `<repo>`**, one step per repo, only with `--delete-branch`: `git branch -d <branch>` in the codebase repo, never `-D`, also with `--force`. When git refuses because the branch is not merged, the branch stays, the warning `branch-not-merged` has the `git branch -D` command to delete it anyway, and the remove goes on. When the repo has no local branch of that name any more, nothing is deleted.
 3. **Remove project folder**: deletes the project folder with the record and `AGENTS.md`, last.
 
@@ -168,6 +168,7 @@ Warning codes, in `warnings`:
 | Code | When |
 | --- | --- |
 | `branch-not-merged` | `--delete-branch` kept a branch that git says is not merged. The hint has the `git branch -D` command. The exit code stays 0. |
+| `programs-still-running` | Programs, such as a dev server, a shell or an editor, had their current folder in a worktree folder. They still run, but their folder is gone. `lines` has one line for each program: the PID, the command and the folder in the project. `xr` sees only the programs of your own user, and only with `lsof` (not on Windows). `xr` itself and the programs that started it do not count, and neither do programs whose folder is the project folder. Stop or restart them. The exit code stays 0. |
 | `invalid-project-record` | A project record is not valid. That project is skipped. |
 | `hook-failed` | A `post-remove` line failed, timed out, or was stopped by Ctrl-C. The project is removed. The hint names the failed or stopped line and every line after it. `lines` has the last 20 lines of the output, when the line printed any. When Ctrl-C comes between two lines, the message names the lines that did not run. The exit code stays 0. |
 

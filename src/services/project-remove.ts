@@ -1,8 +1,8 @@
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Ctx, FinalStep, Tx } from "../domain/ctx.ts";
+import type { Ctx, FinalStep, ProcessCwd, Tx } from "../domain/ctx.ts";
 import { PROJECT_LIST_HINT } from "../domain/hints.ts";
 import { type HookName, hookEnv, hookVars } from "../domain/project.ts";
-import type { RepoItem } from "../domain/report.ts";
+import type { RepoItem, Warning } from "../domain/report.ts";
 import { GitError, XrError } from "../errors/index.ts";
 import { hookWarning, runHookSteps } from "./hooks.ts";
 import { findProject, type ProjectEntry, pickProject } from "./projects.ts";
@@ -66,6 +66,7 @@ export async function removeProject(
     | "out"
     | "config"
     | "hooks"
+    | "processes"
     | "env"
     | "platform"
     | "cwd"
@@ -131,6 +132,13 @@ export async function removeProject(
     }),
   });
 
+  const programs = await programsInWorktrees(
+    ctx,
+    signal,
+    repos.filter((repo) => !missing.has(repo)).map(worktree),
+  );
+  // Before the delete: the folder must exist to find its real path.
+  const realProjectDir = fs.realpath(projectDir);
   const movedOut = isInside(fs, projectDir, ctx.cwd);
   // Windows cannot delete the current folder of a process.
   if (movedOut) ctx.chdir(codebase);
@@ -157,6 +165,12 @@ export async function removeProject(
       },
     },
   ]);
+  if (programs.length) {
+    ctx.out.emit({
+      type: "warning",
+      warning: programsStillRunning(project.name, realProjectDir, programs),
+    });
+  }
   await runPostRemove(ctx, tx, postRemove, codebase, env("post-remove"));
 
   return {
@@ -206,7 +220,7 @@ async function runPostRemove(
  * `git worktree prune` when the worktree folder is `gone`.
  */
 export function removeWorktreeFinal(
-  ctx: Pick<Ctx, "git">,
+  ctx: Pick<Ctx, "git" | "fs">,
   codebase: string,
   projectDir: string,
   repo: string,
@@ -219,7 +233,7 @@ export function removeWorktreeFinal(
       ? `Remove worktree ${repo} (worktree folder missing)`
       : `Remove worktree ${repo}`,
     run: () =>
-      gone ? ctx.git.worktreePrune(dir) : ctx.git.worktreeRemove(dir, path),
+      gone ? ctx.git.worktreePrune(dir) : removeWorktree(ctx, dir, path),
     manualCleanup: {
       what: `worktree of ${repo}`,
       path,
@@ -228,6 +242,30 @@ export function removeWorktreeFinal(
         : `git -C "${dir}" worktree remove --force "${path}"`,
     },
   };
+}
+
+/**
+ * `git worktree remove --force`. When a running program writes a file while git
+ * deletes, git fails with `Directory not empty`: then delete the rest and prune.
+ */
+async function removeWorktree(
+  ctx: Pick<Ctx, "git" | "fs">,
+  dir: string,
+  path: string,
+): Promise<void> {
+  try {
+    await ctx.git.worktreeRemove(dir, path);
+  } catch (error) {
+    // git runs with `LC_ALL=C`, so the text is stable.
+    if (
+      !(error instanceof GitError) ||
+      !error.stderr.includes("Directory not empty")
+    ) {
+      throw error;
+    }
+    ctx.fs.remove(path);
+    await ctx.git.worktreePrune(dir);
+  }
 }
 
 /** The "Delete branch `<repo>`" final step (see `deleteMergedBranch`). Its result goes to `results`. */
@@ -401,6 +439,70 @@ function uncommittedChanges(
     hint,
     details: { worktrees },
   });
+}
+
+/**
+ * The programs, other than `xr` and its ancestors, whose current folder is in
+ * one of `worktrees`. Empty when `xr` cannot tell (Windows, no `lsof`). Reads only.
+ */
+async function programsInWorktrees(
+  ctx: Pick<Ctx, "fs" | "processes">,
+  signal: AbortSignal,
+  worktrees: readonly string[],
+): Promise<ProcessCwd[]> {
+  if (!worktrees.length) return [];
+  const list = await ctx.processes.cwds(signal);
+  if (!list) return [];
+  // `lsof` prints real paths (on macOS `/var` is `/private/var`).
+  return processesInWorktrees(
+    list,
+    ctx.processes.self,
+    worktrees.map((path) => ctx.fs.realpath(path)),
+  );
+}
+
+/** The `programs-still-running` warning: these programs now run in a deleted folder. */
+function programsStillRunning(
+  name: string,
+  realProjectDir: string,
+  programs: readonly ProcessCwd[],
+): Warning {
+  return {
+    code: "programs-still-running",
+    message: `These programs still run in a folder of the removed project ${name}:`,
+    lines: programs.map(
+      ({ pid, command, cwd }) =>
+        `${pid} ${command}  ${relative(realProjectDir, cwd)}`,
+    ),
+    hint: "Stop or restart them: their folder is gone.",
+  };
+}
+
+/**
+ * The processes whose `cwd` is one of `folders` (real paths) or inside one,
+ * without `self` and its ancestors (found by following `ppid` in `processes`).
+ */
+export function processesInWorktrees(
+  processes: readonly ProcessCwd[],
+  self: number,
+  folders: readonly string[],
+): ProcessCwd[] {
+  const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
+  const skip = new Set<number>([self]);
+  for (
+    let pid: number | undefined = byPid.get(self)?.ppid;
+    pid !== undefined && pid > 1 && !skip.has(pid);
+    pid = byPid.get(pid)?.ppid
+  ) {
+    skip.add(pid);
+  }
+  const inside = (cwd: string) =>
+    folders.some(
+      (folder) =>
+        cwd === folder ||
+        cwd.startsWith(folder.endsWith(sep) ? folder : folder + sep),
+    );
+  return processes.filter(({ pid, cwd }) => !skip.has(pid) && inside(cwd));
 }
 
 /** `dir` is `folder` or inside it, with symlinks resolved when the paths exist. */

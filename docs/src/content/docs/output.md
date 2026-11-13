@@ -126,6 +126,7 @@ Warning codes, in `warnings`:
 | --- | --- |
 | `unknown-config-key` | A config file has a key that `xr` does not know. The hint names the closest known key. The command still runs. Doctor commands show these keys as checks instead, not as warnings. |
 | `stale-lock` | The codebase lock belonged to a process that is not running any more, so `xr` took it over. The message has the old process ID. |
+| `programs-still-running` | `xr project remove` removed the project, but programs, such as a dev server, still run in a folder of it. `lines` has the PID, command and folder of each one. The exit code stays 0. |
 | `branch-not-merged` | `xr project remove --delete-branch` kept a branch because git says it is not merged. The hint has the `git branch -D` command to delete it anyway. The exit code stays 0. |
 | `hook-failed` | A `post-remove` line of `xr project remove` failed, timed out, or was stopped by Ctrl-C, after the project was removed. `lines` has the last 20 lines of its output. The exit code stays 0. |
 
