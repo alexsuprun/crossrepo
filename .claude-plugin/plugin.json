@@ -1,6 +1,6 @@
 {
   "name": "xr",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Agent skills for the crossrepo CLI xr: run xr and act on its results, set up a codebase and describe its repos, and write project hooks.",
   "author": {
     "name": "Alex Suprun",
