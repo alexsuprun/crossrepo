@@ -32,6 +32,7 @@ On `missing-argument`, the command did not get a value it needs. When the user's
 ## Rules
 
 - Never add `--force` or `--delete-branch` unless the user says yes to it in this conversation. Show what it would delete first.
+- Always pass `<project>` to `xr project remove`. With `--no-interactive` and no name in a project folder, it removes the current project with no question.
 - Never commit, push, stash or delete files to make an `xr` command pass, unless the user asks for it.
 
 ## Error codes

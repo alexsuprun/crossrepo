@@ -5,7 +5,7 @@ import { type HookName, hookEnv, hookVars } from "../domain/project.ts";
 import type { RepoItem, Warning } from "../domain/report.ts";
 import { GitError, XrError } from "../errors/index.ts";
 import { hookWarning, runHookSteps } from "./hooks.ts";
-import { findProject, type ProjectEntry, pickProject } from "./projects.ts";
+import { type ProjectEntry, targetProject } from "./projects.ts";
 
 /** The flags of `xr project remove`. */
 export interface ProjectRemoveOptions {
@@ -28,25 +28,38 @@ export interface RemovedProject {
 const SHOWN_FILES = 5;
 
 /**
- * The project to remove: the one named (folder name, else branch), or, with no
- * name, the one picked from the project folder names with their branches as
- * hints. Never the current project without a name or a pick. Runs before the
- * transaction, so no lock is held while the user picks. Changes nothing.
+ * The project to remove, in the order of `targetProject`: the one named
+ * (folder name, else branch), else the project of the current project folder,
+ * else the one picked. The current project needs a Yes in a terminal; No
+ * throws `interrupted`. Runs before the transaction, so no lock is held while
+ * the user answers. Changes nothing.
  */
 export async function removeTarget(
-  ctx: Pick<Ctx, "fs" | "config" | "out" | "prompt">,
+  ctx: Pick<
+    Ctx,
+    "fs" | "config" | "out" | "prompt" | "discovery" | "interactive"
+  >,
   codebase: string,
   args: readonly (string | undefined)[],
 ): Promise<ProjectEntry> {
   const [name] = args;
-  if (name !== undefined) {
-    return findProject(ctx, codebase, name, { lenient: true });
-  }
-  return pickProject(ctx, codebase, {
+  const project = await targetProject(ctx, codebase, name, {
     message: "Pick the project to remove",
     missing: "Give the project to remove.",
     hint: "xr project remove <project>",
   });
+  if (
+    name === undefined &&
+    ctx.discovery.kind === "project" &&
+    ctx.interactive &&
+    !(await ctx.prompt.confirm(`Remove the project ${project.name}?`))
+  ) {
+    throw new XrError({
+      code: "interrupted",
+      message: `The project ${project.name} was not removed.`,
+    });
+  }
+  return project;
 }
 
 /**

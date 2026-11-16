@@ -10,7 +10,7 @@ export const projectRemove: CommandUnit = {
   async run(ctx, args, options = {}) {
     const codebase = codebaseDir(ctx.discovery);
     rejectReservedVars(ctx.config);
-    // Before the transaction, so no lock is held while the user picks.
+    // Before the transaction, so no lock is held while the user picks or answers.
     const project = await removeTarget(ctx, codebase, args);
     const { projectDir, branch, repos, movedOut } = await transaction(
       ctx,

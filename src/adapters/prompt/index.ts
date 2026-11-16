@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import { isCancel, multiselect, select } from "@clack/prompts";
+import { confirm, isCancel, multiselect, select } from "@clack/prompts";
 import { interrupted, XrError } from "../../errors/index.ts";
 
 /** What a command asks for when an argument is missing. */
@@ -39,6 +39,15 @@ export interface MultiPrompt {
    * not-interactive and cancel rules as `pick`.
    */
   pickMany(request: PickRequest): Promise<string[]>;
+}
+
+/** The yes/no question. */
+export interface Confirm {
+  /**
+   * Gives the answer; the default is No. A cancel (Ctrl-C or Escape) throws
+   * `interrupted`. Callers ask only when interactive: else it throws and never reads the input.
+   */
+  confirm(message: string): Promise<boolean>;
 }
 
 export interface CreatePromptOptions {
@@ -95,6 +104,29 @@ export function createMultiPrompt({
       if (isCancel(picked)) throw interrupted();
       const marked = new Set(picked);
       return request.choices.filter((choice) => marked.has(choice));
+    },
+  };
+}
+
+/** The yes/no question, with clack `confirm`. */
+export function createConfirm({
+  interactive,
+  input,
+  output,
+}: CreatePromptOptions): Confirm {
+  return {
+    async confirm(message) {
+      if (!interactive) {
+        throw new Error(`confirm is not interactive: ${message}`);
+      }
+      const answer = await confirm({
+        message,
+        initialValue: false,
+        input: input ?? process.stdin,
+        output: output ?? process.stderr,
+      });
+      if (isCancel(answer)) throw interrupted();
+      return answer;
     },
   };
 }

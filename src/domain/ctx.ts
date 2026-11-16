@@ -223,6 +223,8 @@ export interface CtxPrompt {
   pick(request: PickRequest): Promise<string>;
   /** The marked choices, at least one, in list order. */
   pickMany(request: PickRequest): Promise<string[]>;
+  /** A yes/no question, default No. Only when `interactive`; a cancel throws `interrupted`. */
+  confirm(message: string): Promise<boolean>;
 }
 
 /** What one hook line gave. `output` is the end of its stdout and stderr together. */
