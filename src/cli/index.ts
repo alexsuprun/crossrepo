@@ -5,7 +5,11 @@ import { createGit } from "../adapters/git/index.ts";
 import { createHooks } from "../adapters/hooks/index.ts";
 import { createLock } from "../adapters/lock/index.ts";
 import { createProcesses } from "../adapters/processes/index.ts";
-import { createMultiPrompt, createPrompt } from "../adapters/prompt/index.ts";
+import {
+  createConfirm,
+  createMultiPrompt,
+  createPrompt,
+} from "../adapters/prompt/index.ts";
 import { codebaseClone } from "../commands/codebase/clone.ts";
 import { codebaseDoctor } from "../commands/codebase/doctor.ts";
 import { codebaseInit } from "../commands/codebase/init.ts";
@@ -267,6 +271,7 @@ async function runCommand(
     prompt: {
       ...createPrompt({ interactive: flags.interactive }),
       ...createMultiPrompt({ interactive: flags.interactive }),
+      ...createConfirm({ interactive: flags.interactive }),
     },
     lock: { path: lockPath(discovery), adapter: createLock() },
     interrupts,
@@ -539,8 +544,11 @@ export function createProgram({ write, help, select }: ProgramHooks): Command {
     .description(
       "remove the worktrees and the folder of one project; keep the branches",
     )
-    // Optional for commander, so a missing project opens our picker or gives `missing-argument`.
-    .argument("[project]", "the project folder name or branch")
+    // Optional for commander, so a missing project is the current project, else our picker or `missing-argument`.
+    .argument(
+      "[project]",
+      "the project folder name or branch; default: the current project, after a yes/no question in a terminal",
+    )
     .option(
       "--force",
       "remove worktrees even when they have uncommitted changes",

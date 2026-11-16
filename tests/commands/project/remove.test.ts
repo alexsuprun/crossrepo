@@ -26,7 +26,7 @@ import {
   fakeInterrupts,
 } from "../../helpers/interrupts.ts";
 import { type Isolation, isolate, writeFile } from "../../helpers/isolate.ts";
-import { fakeKeys, fakePick } from "../../helpers/prompt.ts";
+import { fakeConfirm, fakeKeys, fakePick } from "../../helpers/prompt.ts";
 
 let iso: Isolation;
 let codebase: string;
@@ -1136,8 +1136,10 @@ describe("xr project remove with no project", () => {
 
   test("in a terminal: picks from the folder names with the branches as hints, then removes", async () => {
     const requests = fakePick(spies, "fix--bug");
+    const questions = fakeConfirm(spies, false);
     const result = await run(REMOVE, { tty: true });
     expect(result.code).toBe(0);
+    expect(questions).toEqual([]);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       argument: "project",
@@ -1201,11 +1203,115 @@ describe("xr project remove with no project", () => {
     ]);
   });
 
-  test("in a project folder: never the current project, missing-argument", async () => {
-    const result = await run(["--json", ...REMOVE], { cwd: login });
-    expect(result.code).toBe(2);
-    expect(JSON.parse(result.stdout).error.code).toBe("missing-argument");
-    expect(existsSync(login)).toBe(true);
+  for (const [mode, argv, tty] of [
+    ["--json", ["--json", ...REMOVE], false],
+    ["--no-interactive", ["--no-interactive", "--json", ...REMOVE], true],
+  ] as const) {
+    test(`in a project folder, ${mode}: removes the current project with no question`, async () => {
+      const questions = fakeConfirm(spies, false);
+      const requests = fakePick(spies, "fix--bug");
+      const result = await run([...argv], { cwd: login, tty });
+      expect(result.code).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(data.project).toBe(login);
+      expect(data.branch).toBe("feat/login");
+      expect(data.notes).toEqual([
+        `Your shell is in a deleted folder. Run \`cd ${codebase}\`.`,
+      ]);
+      expect(questions).toEqual([]);
+      expect(requests).toHaveLength(0);
+      expect(chdirs).toEqual([codebase]);
+      expect(existsSync(login)).toBe(false);
+      expect(existsSync(join(projects, "fix--bug"))).toBe(true);
+    });
+  }
+
+  test("in a project folder, in a terminal: Yes removes the current project, no picker", async () => {
+    const questions = fakeConfirm(spies, true);
+    const requests = fakePick(spies, "fix--bug");
+    const result = await run(REMOVE, { cwd: login, tty: true });
+    expect(result.code).toBe(0);
+    expect(questions).toEqual(["Remove the project feat--login?"]);
+    expect(requests).toHaveLength(0);
+    expect(existsSync(login)).toBe(false);
+    expect(existsSync(join(projects, "fix--bug"))).toBe(true);
+  });
+
+  test("in a project folder, in a terminal: No is interrupted, exit 130, nothing changes", async () => {
+    const questions = fakeConfirm(spies, false);
+    const before = state();
+    const result = await run(REMOVE, { cwd: login, tty: true });
+    expect(result.code).toBe(130);
+    expect(result.stderr).toContain("The project feat--login was not removed.");
+    expect(questions).toEqual(["Remove the project feat--login?"]);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+    expect(chdirs).toEqual([]);
+  });
+
+  test("in a project folder, in a terminal: Escape is interrupted, exit 130, nothing changes", async () => {
+    fakeKeys(spies, [ESCAPE]);
+    const before = state();
+    const result = await run(REMOVE, { cwd: login, tty: true });
+    expect(result.code).toBe(130);
+    expect(result.stderr).toContain("Stopped by Ctrl-C.");
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  for (const [name, removed] of [
+    ["fix/bug", "fix--bug"],
+    ["feat--login", "feat--login"],
+  ] as const) {
+    test(`in a project folder, in a terminal, named ${name}: no question, removes it`, async () => {
+      const questions = fakeConfirm(spies, false);
+      const result = await run([...REMOVE, name], { cwd: login, tty: true });
+      expect(result.code).toBe(0);
+      expect(questions).toEqual([]);
+      expect(existsSync(join(projects, removed))).toBe(false);
+    });
+  }
+
+  test("in a project folder: the question runs before the lock", async () => {
+    const lockAtQuestion: boolean[] = [];
+    spies.push(
+      spyOn(promptAdapter, "createConfirm").mockImplementation(() => ({
+        confirm: () => {
+          lockAtQuestion.push(existsSync(lockFile));
+          return Promise.resolve(true);
+        },
+      })),
+    );
+    const result = await run(REMOVE, { cwd: login, tty: true });
+    expect(result.code).toBe(0);
+    expect(lockAtQuestion).toEqual([false]);
+  });
+
+  test("in a project folder whose record has no branch: invalid-project-record, nothing changes", async () => {
+    const record = join(login, ".crossrepo", "project.yaml");
+    writeFile(record, `codebase: ${codebase}\nrepos:\n  - api\n  - web\n`);
+    const before = state();
+    const result = await json(REMOVE, { cwd: login });
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("invalid-project-record");
+    expect(result.data.error.message).toContain(record);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("in a terminal, in a project folder whose record has no branch: invalid-project-record before the question", async () => {
+    const questions = fakeConfirm(spies, true);
+    const record = join(login, ".crossrepo", "project.yaml");
+    writeFile(record, `codebase: ${codebase}\nrepos:\n  - api\n  - web\n`);
+    const before = state();
+    const result = await run(REMOVE, { cwd: login, tty: true });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      `The project record ${record} is not valid: it has no \`branch\`.`,
+    );
+    expect(questions).toEqual([]);
+    expect(state()).toEqual(before);
+    expect(existsSync(lockFile)).toBe(false);
   });
 
   test("in a project folder, by name: removes the other project", async () => {

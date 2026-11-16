@@ -18,19 +18,27 @@ It works in a codebase folder or in a project folder, or with `--codebase-path <
 
 | Argument or option | What it does |
 | --- | --- |
-| `<project>` | The project to remove: its folder name, such as `feat--login`, or its branch, such as `feat/login`. The folder name is tried first. |
+| `<project>` | The project to remove: its folder name, such as `feat--login`, or its branch, such as `feat/login`. The folder name is tried first. In a project folder, the default is the current project. |
 | `--force` | Remove the worktrees even when they have uncommitted changes. It skips only this check. It never skips the drift check or the `pre-remove` hook, and it never deletes an unmerged branch. |
 | `--delete-branch` | After each worktree is removed, delete its branch with `git branch -d`. A branch that is not merged stays. |
 
 A project record that is not valid is a warning `invalid-project-record`, and that project is skipped. So the remove of another project goes on, and a project whose own record is not valid is not found (`project-not-found`).
 
-## Pick a project
+## With no project
 
-With no `<project>`, a picker "Pick the project to remove" opens in a terminal. It lists the project folder names of the codebase, in name order, with the branch of each one next to it. Pick one with the arrow keys and Enter. Ctrl-C or Escape in the picker stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
+The command finds the project in this order:
+
+1. `<project>`, when you give it.
+2. Else, in a project folder, the current project, from its own record. Only the current folder counts: `xr` does not look at parent folders. A record that is not valid fails with `invalid-project-record`, and nothing changes.
+3. Else, in a codebase folder, the project you pick, as below.
+
+A named or picked project gets no question. In a terminal, the current project with no `<project>` needs a yes first. `xr` asks `Remove the project feat--login?`, and the default answer is No. No stops the command with `interrupted`, the message `The project feat--login was not removed.` and exit code 130. Ctrl-C or Escape stops it with `interrupted` and exit code 130 too. Nothing changes, and the question comes before the lock is taken. With `--json` or `--no-interactive`, or when stdin or stdout is not a terminal, there is no question: the current project is removed. After that, your shell is in a deleted folder, and the output ends with a note to `cd` to the codebase.
+
+### Pick a project
+
+In a codebase folder with no `<project>`, a picker "Pick the project to remove" opens in a terminal. It lists the project folder names of the codebase, in name order, with the branch of each one next to it. Pick one with the arrow keys and Enter. Ctrl-C or Escape in the picker stops the command with `interrupted` (exit code 130), and nothing changes. The picker opens before the lock is taken.
 
 The picker opens only when stdin and stdout are a terminal, and neither `--json` nor `--no-interactive` is given. Otherwise the command fails with `missing-argument` and the message lists the projects. With `--json`, `error.details` is `{ "argument": "project", "choices": ["feat--login", "fix--bug"] }`. With no project in the codebase, the command fails with `missing-argument` and the message `There is no project in this codebase.` in every mode.
-
-In a project folder too, `xr project remove` never takes the current project by itself. You must name it or pick it.
 
 ## Checks first
 
@@ -150,7 +158,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 
 | Code | When |
 | --- | --- |
-| `missing-argument` | No `<project>`, and no picker can open, or the codebase has no project. `error.details` is `{ "argument": "project", "choices": [<name>] }`. The exit code is 2. |
+| `missing-argument` | No `<project>` in a codebase folder, and no picker can open, or the codebase has no project. `error.details` is `{ "argument": "project", "choices": [<name>] }`. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase or a project folder. |
 | `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The message names each such name and the config file that sets it. The hint is `xr codebase doctor`. It comes first, before the picker: no lock, no change. |
 | `project-not-found` | No project of this codebase has that folder name or branch. `error.details.project` is the name. The hint is `xr project list`. It also comes when the project record is gone by the time the lock is taken, for example when another program deleted it while you picked. Nothing changes. |
@@ -161,7 +169,7 @@ With `--json`, stdout is one JSON object. `project` is the absolute path. Each r
 | `git-failed` | A git command failed. In the delete phase, `error.details.leftovers` lists what is left. |
 | `git-too-old` | git is older than 2.27. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
-| `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in the picker. In the check phase nothing changes. In the delete phase, `error.details.leftovers` lists what is left. The exit code is 130. |
+| `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in the picker or the yes/no question, or you answered No to the question for the current project. In the check phase nothing changes. In the delete phase, `error.details.leftovers` lists what is left. The exit code is 130. |
 
 Warning codes, in `warnings`:
 
@@ -169,7 +177,7 @@ Warning codes, in `warnings`:
 | --- | --- |
 | `branch-not-merged` | `--delete-branch` kept a branch that git says is not merged. The hint has the `git branch -D` command. The exit code stays 0. |
 | `programs-still-running` | Programs, such as a dev server, a shell or an editor, had their current folder in a worktree folder. They still run, but their folder is gone. `lines` has one line for each program: the PID, the command and the folder in the project. `xr` sees only the programs of your own user, and only with `lsof` (not on Windows). `xr` itself and the programs that started it do not count, and neither do programs whose folder is the project folder. Stop or restart them. The exit code stays 0. |
-| `invalid-project-record` | A project record is not valid. That project is skipped. |
+| `invalid-project-record` | A project record is not valid. That project is skipped. With no `<project>` in a project folder whose own record is not valid, it is an error instead, and nothing changes. |
 | `hook-failed` | A `post-remove` line failed, timed out, or was stopped by Ctrl-C. The project is removed. The hint names the failed or stopped line and every line after it. `lines` has the last 20 lines of the output, when the line printed any. When Ctrl-C comes between two lines, the message names the lines that did not run. The exit code stays 0. |
 
 See [Output and errors](../../output/) for the exit codes.

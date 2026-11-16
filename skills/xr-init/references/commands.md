@@ -213,7 +213,8 @@ Usage: xr project remove [options] [project]
 remove the worktrees and the folder of one project; keep the branches
 
 Arguments:
-  project          the project folder name or branch
+  project          the project folder name or branch; default: the current
+                   project, after a yes/no question in a terminal
 
 Options:
   --force          remove worktrees even when they have uncommitted changes

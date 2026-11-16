@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import {
+  createConfirm,
   createMultiPrompt,
   createPrompt,
   type PickRequest,
@@ -50,6 +51,7 @@ function fakeTerminal({
     prompt: {
       ...createPrompt({ interactive, input, output }),
       ...createMultiPrompt({ interactive, input, output }),
+      ...createConfirm({ interactive, input, output }),
     },
     written: () => written,
     read: () => read,
@@ -65,6 +67,81 @@ async function failure(promise: Promise<unknown>): Promise<XrError> {
   }
   throw new Error("the pick did not fail");
 }
+
+describe("createConfirm", () => {
+  const LEFT = "\x1b[D";
+
+  test("Enter gives the default No; the question writes to the output", async () => {
+    const terminal = fakeTerminal({ interactive: true, keys: [ENTER] });
+    expect(await terminal.prompt.confirm("Remove the project login?")).toBe(
+      false,
+    );
+    expect(terminal.written()).toContain("Remove the project login?");
+  });
+
+  test("arrow left and Enter gives Yes", async () => {
+    const terminal = fakeTerminal({ interactive: true, keys: [LEFT, ENTER] });
+    expect(await terminal.prompt.confirm("Remove the project login?")).toBe(
+      true,
+    );
+  });
+
+  test("y gives Yes", async () => {
+    const terminal = fakeTerminal({ interactive: true, keys: ["y"] });
+    expect(await terminal.prompt.confirm("Remove the project login?")).toBe(
+      true,
+    );
+  });
+
+  for (const [name, key] of [
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ] as const) {
+    test(`${name} cancels: interrupted`, async () => {
+      const terminal = fakeTerminal({ interactive: true, keys: [key] });
+      const error = await failure(terminal.prompt.confirm("Remove?"));
+      expect(error.code).toBe("interrupted");
+      expect(error.message).toBe("Stopped by Ctrl-C.");
+    });
+  }
+
+  test("not interactive: throws; nothing is read or written", async () => {
+    const terminal = fakeTerminal({ interactive: false, keys: ["y"] });
+    await expect(terminal.prompt.confirm("Remove?")).rejects.toThrow(
+      "not interactive",
+    );
+    expect(terminal.written()).toBe("");
+    expect(terminal.read()).toBe(false);
+  });
+
+  test("the question writes to process.stderr by default", async () => {
+    const input = new PassThrough();
+    input.write("y");
+    let stderr = "";
+    let stdout = "";
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stderr += String(chunk);
+        return true;
+      },
+    );
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stdout += String(chunk);
+        return true;
+      },
+    );
+    try {
+      const prompt = createConfirm({ interactive: true, input });
+      expect(await prompt.confirm("Remove the project login?")).toBe(true);
+    } finally {
+      stderrSpy.mockRestore();
+      stdoutSpy.mockRestore();
+    }
+    expect(stderr).toContain("Remove the project login?");
+    expect(stdout).toBe("");
+  });
+});
 
 describe("createPrompt interactive", () => {
   test("Enter picks the first choice; the picker writes to the output", async () => {
