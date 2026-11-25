@@ -1,6 +1,6 @@
 ---
 name: xr-hooks
-description: 'Writes crossrepo project hooks (pre-create, post-create, pre-remove, post-remove) and project.vars in the right crossrepo config file, as POSIX sh that needs no input, so the hook works on the first run. Reads the current config with xr config show first, asks which config level gets the hook, keeps comments and key order, and checks the result with xr codebase doctor. Use when the user wants xr to run a command when a project is created or removed, such as installing dependencies, copying .env files, or cleanup. Triggers on "add a post-create hook", "run npm ci after xr project create", "copy .env into each new project", "add a crossrepo hook", "clean up when a project is removed", "set a hook variable".'
+description: 'Writes crossrepo project hooks (pre-create, post-create, pre-remove, post-remove, pre-repo-add, post-repo-add, pre-repo-remove, post-repo-remove) and project.vars in the right crossrepo config file, as POSIX sh that needs no input, so the hook works on the first run. Reads the current config with xr config show first, asks which config level gets the hook, keeps comments and key order, and checks the result with xr codebase doctor. Use when the user wants xr to run a command when a project is created or removed, or a repo is added to or removed from a project, such as installing dependencies, copying .env files, or cleanup. Triggers on "add a post-create hook", "run npm ci after xr project create", "copy .env into each new project", "add a crossrepo hook", "clean up when a project is removed", "save ai-docs before a repo is removed", "set a hook variable".'
 license: MIT
 ---
 
@@ -33,7 +33,7 @@ Run `xr config show --json --no-interactive`. Tell the user which hooks and `pro
 
 ## 3. Pick the hook
 
-All 4 hooks are lists under `project:`. `pre-` hooks check, `post-` hooks do the work.
+All 8 hooks are lists under `project:`. `pre-` hooks check, `post-` hooks do the work.
 
 | Hook | Folder | Runs | When a line fails |
 | --- | --- | --- | --- |
@@ -41,17 +41,22 @@ All 4 hooks are lists under `project:`. `pre-` hooks check, `post-` hooks do the
 | `post-create` | project folder | After the worktrees and `AGENTS.md` are made. | The whole create is undone. What the hook itself did is not undone. |
 | `pre-remove` | project folder | Before `xr project remove` removes anything. | The project stays whole. `--force` does not skip this hook. |
 | `post-remove` | codebase folder | After the project is removed. | Only a warning. |
+| `pre-repo-add` | project folder | Before `xr project repo add` adds anything. | Nothing is added. |
+| `post-repo-add` | project folder | After the new worktrees, the record and `AGENTS.md` are written. | The whole add is undone. What the hook itself did is not undone. |
+| `pre-repo-remove` | project folder | Before `xr project repo remove` removes anything, after the uncommitted check. | The repos stay. `--force` does not skip this hook. |
+| `post-repo-remove` | project folder | After the repos are removed. | Only a warning. |
 
-- Only `xr project create` and `xr project remove` run hooks.
+- `xr project create` and `xr project remove` run only `pre-create`, `post-create`, `pre-remove` and `post-remove`. `xr project repo add` and `xr project repo remove` run only the 4 repo hooks. No other command runs a hook.
+- To save files that git ignores, such as an ai-docs folder, before a repo is removed, use `pre-repo-remove`: the uncommitted check skips ignored files.
 - Each list item is its own `sh -c`, in list order. The first line that fails stops the hook.
 - stdin is closed, so a line cannot ask questions.
 - Each line can run for 10 minutes, then it fails.
 - The output goes to stderr.
-- A hook runs once per project, not once per repo. To act in each repo, loop over `$CROSSREPO_PROJECT_REPOS`.
+- A hook runs once per command, not once per repo. To act in each repo, loop over `$CROSSREPO_REPOS` or `$CROSSREPO_PROJECT_REPOS`.
 
 ## 4. Use only these variables
 
-- The 7 built-in vars: `CROSSREPO_HOOK`, `CROSSREPO_CODEBASE_PATH`, `CROSSREPO_CODEBASE_NAME`, `CROSSREPO_PROJECT_PATH`, `CROSSREPO_PROJECT_NAME`, `CROSSREPO_PROJECT_BRANCH`, `CROSSREPO_PROJECT_REPOS` (one repo per line; it includes the repos with `always: true` that `xr project create` added).
+- The 8 built-in vars: `CROSSREPO_HOOK`, `CROSSREPO_CODEBASE_PATH`, `CROSSREPO_CODEBASE_NAME`, `CROSSREPO_PROJECT_PATH`, `CROSSREPO_PROJECT_NAME`, `CROSSREPO_PROJECT_BRANCH`, `CROSSREPO_PROJECT_REPOS` (one repo per line; it includes the repos with `always: true` that `xr project create` added; in a repo hook, the repos before the change in `pre-` and after it in `post-`), `CROSSREPO_REPOS` (the repos the command adds or removes, one per line; in the create and remove hooks, the same as `CROSSREPO_PROJECT_REPOS`).
 - Do not write a `post-create` hook that links or adds a shared repo to each project. Set `always: true` on that repo instead: a hook cannot add a repo, because an `xr` command started by a hook fails with `lock-held`.
 - Each `project.vars` entry, under its exact name.
 - In `pre-create` and `post-remove`, the project folder and the worktrees do not exist.
@@ -96,6 +101,7 @@ Run `xr codebase doctor --json --no-interactive`. Show each `reserved-var-name` 
 Offer a test, and run it only with the user's yes. Never run a hook in any other way.
 
 1. `xr project create <test-branch> <repo> --json --no-interactive`, on a new test branch.
-2. Only when the create result has `ok: true`: `xr project remove <project> --json --no-interactive`.
+2. For a repo hook, only when the create result has `ok: true`: `xr project repo add <repo> --project <project> --json --no-interactive` with a repo that is not in the test project, then `xr project repo remove <repo> --project <project> --json --no-interactive`.
+3. Only when the create result has `ok: true`: `xr project remove <project> --json --no-interactive`.
 
-On `hook-failed`, show `error.details`: `command`, `exitCode`, `timedOut` and `hookOutput.lines`. After `xr project remove`, also read `warnings`: a failed `post-remove` line gives a `hook-failed` warning with `message`, `hint` and `lines`, and the remove still succeeds. The test branch stays after the remove. Delete it only with the user's yes.
+On `hook-failed`, show `error.details`: `command`, `exitCode`, `timedOut` and `hookOutput.lines`. After `xr project remove` or `xr project repo remove`, also read `warnings`: a failed `post-remove` or `post-repo-remove` line gives a `hook-failed` warning with `message`, `hint` and `lines`, and the remove still succeeds. The test branch stays after the remove. Delete it only with the user's yes.

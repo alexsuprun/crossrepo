@@ -69,16 +69,17 @@ export function hookFailed(
 }
 
 /**
- * The `hook-failed` warning of a `post-remove` that did not end well, after the
- * project is removed: `error` is the `hook-failed` of a line, or the
- * `interrupted` of a Ctrl-C, whose cause is the `hook-failed` of the stopped
- * line when one ran. `notRun` starts with the line that failed or would run
+ * The `hook-failed` warning of a `post-remove` or `post-repo-remove` that did
+ * not end well, after the change is done. `done` starts the hint and says what
+ * was done. `error` is the `hook-failed` of a line, or the `interrupted` of a
+ * Ctrl-C, whose cause is the `hook-failed` of the stopped line when one ran. `notRun` starts with the line that failed or would run
  * next. Gives `undefined` for any other error.
  */
 export function hookWarning(
   hook: HookName,
   error: unknown,
   notRun: readonly string[],
+  done: string,
 ): Warning | undefined {
   if (!(error instanceof XrError)) return undefined;
   const names = notRun.map((command) => `\`${command}\``).join(", ");
@@ -86,7 +87,7 @@ export function hookWarning(
     return {
       code: "hook-failed",
       message: error.message,
-      hint: `The project is removed. Fix the line in \`project.${hook}\`, then run by hand the lines that did not run: ${names}.`,
+      hint: `${done} Fix the line in \`project.${hook}\`, then run by hand the lines that did not run: ${names}.`,
       ...outputLines(error),
     };
   }
@@ -98,7 +99,7 @@ export function hookWarning(
       cause === undefined
         ? `The ${hook} hook was stopped by Ctrl-C before ${names} ran.`
         : `The ${hook} hook \`${notRun[0]}\` was stopped by Ctrl-C.`,
-    hint: `The project is removed. Run by hand the lines that did not run, if they are needed: ${names}.`,
+    hint: `${done} Run by hand the lines that did not run, if they are needed: ${names}.`,
     ...(cause instanceof XrError && cause.code === "hook-failed"
       ? outputLines(cause)
       : {}),

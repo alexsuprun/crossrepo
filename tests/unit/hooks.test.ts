@@ -92,16 +92,36 @@ describe("hookWarning", () => {
     timedOut: false,
     output: "x\n",
   });
+  const DONE = "The project is removed.";
   const CTRL_C_HINT =
     "The project is removed. Run by hand the lines that did not run, if they are needed: `a`, `b`.";
 
   test("a failed line: its message, a hint that names it and the lines after it, and the output lines", () => {
-    expect(hookWarning("post-remove", failed, ["a", "b"])).toEqual({
+    expect(hookWarning("post-remove", failed, ["a", "b"], DONE)).toEqual({
       code: "hook-failed",
       message: "The post-remove hook `a` failed with exit code 2.",
       hint: "The project is removed. Fix the line in `project.post-remove`, then run by hand the lines that did not run: `a`, `b`.",
       lines: ["x", "y"],
     });
+  });
+
+  test("the hint starts with the given done text", () => {
+    const repoFailed = hookFailed("post-repo-remove", "a", {
+      ok: false,
+      exitCode: 1,
+      timedOut: false,
+      output: "",
+    });
+    expect(
+      hookWarning(
+        "post-repo-remove",
+        repoFailed,
+        ["a"],
+        "The repos api, web are removed.",
+      )?.hint,
+    ).toBe(
+      "The repos api, web are removed. Fix the line in `project.post-repo-remove`, then run by hand the lines that did not run: `a`.",
+    );
   });
 
   test("a failed line that printed nothing: no lines", () => {
@@ -111,7 +131,7 @@ describe("hookWarning", () => {
       timedOut: false,
       output: "",
     });
-    expect(hookWarning("post-remove", silent, ["a"])).toEqual({
+    expect(hookWarning("post-remove", silent, ["a"], DONE)).toEqual({
       code: "hook-failed",
       message: "The post-remove hook `a` failed with exit code 1.",
       hint: "The project is removed. Fix the line in `project.post-remove`, then run by hand the lines that did not run: `a`.",
@@ -120,7 +140,7 @@ describe("hookWarning", () => {
 
   test("a Ctrl-C that stopped a line: names it, the Ctrl-C hint and the output lines", () => {
     expect(
-      hookWarning("post-remove", interrupted(stopped), ["a", "b"]),
+      hookWarning("post-remove", interrupted(stopped), ["a", "b"], DONE),
     ).toEqual({
       code: "hook-failed",
       message: "The post-remove hook `a` was stopped by Ctrl-C.",
@@ -130,17 +150,24 @@ describe("hookWarning", () => {
   });
 
   test("a Ctrl-C before a line: names the lines that did not run", () => {
-    expect(hookWarning("post-remove", interrupted(), ["a", "b"])).toEqual({
-      code: "hook-failed",
-      message:
-        "The post-remove hook was stopped by Ctrl-C before `a`, `b` ran.",
-      hint: CTRL_C_HINT,
-    });
+    expect(hookWarning("post-remove", interrupted(), ["a", "b"], DONE)).toEqual(
+      {
+        code: "hook-failed",
+        message:
+          "The post-remove hook was stopped by Ctrl-C before `a`, `b` ran.",
+        hint: CTRL_C_HINT,
+      },
+    );
   });
 
   test("a Ctrl-C during a line that failed in another way: names that line", () => {
     expect(
-      hookWarning("post-remove", interrupted(new Error("spawn")), ["a", "b"]),
+      hookWarning(
+        "post-remove",
+        interrupted(new Error("spawn")),
+        ["a", "b"],
+        DONE,
+      ),
     ).toEqual({
       code: "hook-failed",
       message: "The post-remove hook `a` was stopped by Ctrl-C.",
@@ -149,12 +176,15 @@ describe("hookWarning", () => {
   });
 
   test("any other error gives no warning", () => {
-    expect(hookWarning("post-remove", new Error("x"), ["a"])).toBeUndefined();
+    expect(
+      hookWarning("post-remove", new Error("x"), ["a"], DONE),
+    ).toBeUndefined();
     expect(
       hookWarning(
         "post-remove",
         new XrError({ code: "internal", message: "x" }),
         ["a"],
+        DONE,
       ),
     ).toBeUndefined();
   });

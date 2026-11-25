@@ -44,14 +44,17 @@ The command takes the codebase lock, `.crossrepo/xr.lock`, then checks each repo
 3. The repo is not in the project yet, else `repo-already-in-project`.
 4. Nothing is at `<project folder>/<repo>`, no folder and no file, else `project-drift`. Move it out of the project folder, then run the command again. `xr` never deletes it for you.
 5. `git fetch origin` passes, the default branch is found, and the project branch is not checked out in another place (`branch-in-use`). These are the same checks as in [xr project create](../project-create/).
+6. When `pre-repo-add` or `post-repo-add` is set, `sh` must be found, else `sh-not-found`.
+7. The `pre-repo-add` hook runs in the project folder. A failed line stops the command with `hook-failed`, and nothing changes.
 
 ## Steps
 
 1. **Add worktree `<repo>`**, one step per repo, with the branch rules of [xr project create](../project-create/): the local branch when it exists, else a new branch that tracks `origin/<branch>`, else a new branch from `origin/<default branch>`.
 2. **Write project record**: the record gets the new repos, in codebase config order. The `created` time stays.
 3. **Write AGENTS.md**: only the `## Codebase` and `## Repos` sections of the project `AGENTS.md` change. Your own text in the rest of the file stays.
+4. One step for each `post-repo-add` line, in the project folder.
 
-No hook runs, also not `post-create`. When a step fails, or you press Ctrl-C, every step that ran is undone in reverse order: the new worktrees are removed, a branch that the command made is deleted, and the record and `AGENTS.md` get their old text back. A branch that existed before is never deleted. When an undo fails, `error.details.leftovers` lists what is left, each with the command to clean it up by hand.
+The command runs the `pre-repo-add` and `post-repo-add` hooks, not `pre-create` or `post-create`; see the [hooks guide](../../guides/hooks/). When a step fails, `post-repo-add` fails, or you press Ctrl-C, every step that ran is undone in reverse order: the new worktrees are removed, a branch that the command made is deleted, and the record and `AGENTS.md` get their old text back. A branch that existed before is never deleted. When an undo fails, `error.details.leftovers` lists what is left, each with the command to clean it up by hand.
 
 ## Output
 
@@ -87,6 +90,7 @@ feat/login
 | --- | --- |
 | `missing-argument` | No project or no repo, and no picker can open, or there is nothing to pick. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase or a project folder. |
+| `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The hint is `xr codebase doctor`. It comes first, before the pickers: no lock, no change. |
 | `project-not-found` | No project has the name of `--project`, or the project record is gone by the time the lock is taken. Nothing changes. |
 | `invalid-project-record` | The record of the current project folder is not valid, or the record of the chosen project is not valid when it is read again inside the lock. Nothing changes. For another project it is a warning, and that project is skipped. |
 | `repo-not-found` | A repo is not in the merged config. |
@@ -95,6 +99,8 @@ feat/login
 | `project-drift` | A folder or file is at the worktree path of a repo. `error.details` is `{ "path", "folders" }`. |
 | `branch-in-use` | The project branch is checked out in the codebase repo or in another worktree. |
 | `no-default-branch` | A repo has no default branch. |
+| `sh-not-found` | `pre-repo-add` or `post-repo-add` is set, and Windows has no Git for Windows `sh.exe`. Nothing changes. |
+| `hook-failed` | A `pre-repo-add` or `post-repo-add` line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`. After `pre-repo-add`, nothing changed. After `post-repo-add`, every step is undone. |
 | `git-failed` | A git command failed. Every step is undone. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
 | `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in a picker. Every step is undone. The exit code is 130. |

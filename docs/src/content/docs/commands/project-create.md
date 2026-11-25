@@ -144,7 +144,7 @@ On macOS and Linux, `xr` uses `/bin/sh`. On Windows, it finds `git.exe` on `PATH
 
 ### Variables
 
-Each line of `pre-create` and `post-create` gets the environment of `xr`, then the values of `project.vars`, then these 7 variables. A later name wins, so the 7 variables always win. On Windows, names match with case ignored.
+Each line of `pre-create` and `post-create` gets the environment of `xr`, then the values of `project.vars`, then these 8 variables. A later name wins, so the 8 variables always win. On Windows, names match with case ignored.
 
 | Variable | Value |
 | --- | --- |
@@ -154,7 +154,8 @@ Each line of `pre-create` and `post-create` gets the environment of `xr`, then t
 | `CROSSREPO_PROJECT_NAME` | The project folder name, the slug. |
 | `CROSSREPO_PROJECT_BRANCH` | The branch. |
 | `CROSSREPO_PROJECT_REPOS` | The repos of the project, one per line, in record order. In `pre-create`, the record does not exist yet, so the order is the one the record will have. |
-| `CROSSREPO_HOOK` | The hook that runs: `pre-create` or `post-create` here, and `pre-remove` or `post-remove` in [`xr project remove`](../project-remove/). |
+| `CROSSREPO_REPOS` | The repos that the command adds, one per line. Here it is the same as `CROSSREPO_PROJECT_REPOS`. |
+| `CROSSREPO_HOOK` | The hook that runs: `pre-create` or `post-create` here, `pre-remove` or `post-remove` in [`xr project remove`](../project-remove/), `pre-repo-add` or `post-repo-add` in [`xr project repo add`](../project-repo-add/), and `pre-repo-remove` or `post-repo-remove` in [`xr project repo remove`](../project-repo-remove/). |
 
 A `project.vars` value can be text, a number or a boolean. A number or a boolean is passed as text: `5432` becomes `"5432"` and `true` becomes `"true"`. A list or a map is `invalid-config`.
 

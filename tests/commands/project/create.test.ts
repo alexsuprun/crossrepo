@@ -881,13 +881,16 @@ describe("xr project create: always repos", () => {
   }
 
   test("an always repo that is not named is added, and hooks see it in CROSSREPO_PROJECT_REPOS", async () => {
-    postCreate(['printf "%s" "$CROSSREPO_PROJECT_REPOS" > repos.txt']);
+    postCreate([
+      'printf "%s" "$CROSSREPO_PROJECT_REPOS" > repos.txt; printf "%s" "$CROSSREPO_REPOS" > changed.txt',
+    ]);
     always("api");
     const result = await json([...CREATE, "feat/x", "web"]);
     expect(result.code).toBe(0);
     expect(repoNames(result.data)).toEqual(["api", "web"]);
     const project = join(projects, "feat--x");
     expect(readFileSync(join(project, "repos.txt"), "utf8")).toBe("api\nweb");
+    expect(readFileSync(join(project, "changed.txt"), "utf8")).toBe("api\nweb");
     expect(
       readFileSync(join(project, ".crossrepo", "project.yaml"), "utf8"),
     ).toContain("repos:\n  - api\n  - web\n");

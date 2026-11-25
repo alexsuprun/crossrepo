@@ -1,9 +1,11 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Ctx, Tx } from "../domain/ctx.ts";
+import { type HookName, hookEnv, hookVars } from "../domain/project.ts";
 import { renderProjectRecord } from "../domain/project-record.ts";
 import type { RepoItem } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
 import { projectAgentsText, writeAgentsText } from "./agents-md.ts";
+import { runHookSteps } from "./hooks.ts";
 import {
   type BranchResult,
   checkUncommitted,
@@ -11,6 +13,7 @@ import {
   isInside,
   removedRepoItem,
   removeWorktreeFinal,
+  runPostRemove,
 } from "./project-remove.ts";
 import { type ProjectEntry, reloadProject } from "./projects.ts";
 
@@ -60,12 +63,25 @@ export async function repoRemoveNames(
  * The check phase and the delete phase of `xr project repo remove`, run inside
  * a transaction that holds the lock. The checks change nothing: each repo is in
  * the project, at least one repo stays, and no worktree has uncommitted
- * changes (unless `force`). Then the `tx.finals` steps remove the worktrees,
- * the branches with `deleteBranch`, and only then write the record and
- * `AGENTS.md`. Runs no hook (AD-11).
+ * changes (unless `force`), `sh` is found when `pre-repo-remove` or
+ * `post-repo-remove` is set, and `pre-repo-remove` passes. Then the `tx.finals`
+ * steps remove the worktrees, the branches with `deleteBranch`, and only then
+ * write the record and `AGENTS.md`. Last, `post-repo-remove` runs; a failed or
+ * stopped line is a `hook-failed` warning. Both hooks run in the project folder.
  */
 export async function removeProjectRepos(
-  ctx: Pick<Ctx, "fs" | "git" | "out" | "config" | "cwd" | "chdir">,
+  ctx: Pick<
+    Ctx,
+    | "fs"
+    | "git"
+    | "out"
+    | "config"
+    | "hooks"
+    | "env"
+    | "platform"
+    | "cwd"
+    | "chdir"
+  >,
   tx: Tx,
   codebase: string,
   target: ProjectEntry,
@@ -109,6 +125,33 @@ export async function removeProjectRepos(
       },
     );
   }
+  const { preRepoRemove, postRepoRemove } = ctx.config;
+  if (preRepoRemove.length || postRepoRemove.length) ctx.hooks.findSh();
+  const env = (hook: HookName, projectRepos: readonly string[]) =>
+    hookEnv(
+      ctx.env,
+      ctx.config.vars,
+      hookVars({
+        codebasePath: codebase,
+        codebaseName: ctx.config.name ?? basename(codebase),
+        projectPath: projectDir,
+        projectName: project.name,
+        branch,
+        repos: projectRepos,
+        changed: repos,
+        hook,
+      }),
+      ctx.platform,
+    );
+  await runHookSteps(ctx, tx, "pre-repo-remove", preRepoRemove, {
+    cwd: projectDir,
+    env: env("pre-repo-remove", project.repos),
+    cleanup: (command) => ({
+      what: "pre-repo-remove hook",
+      path: projectDir,
+      command: `Undo by hand what \`${command}\` did, if anything.`,
+    }),
+  });
 
   const movedOut = repos.some((repo) => isInside(fs, worktree(repo), ctx.cwd));
   // Windows cannot delete the current folder of a process.
@@ -166,6 +209,14 @@ export async function removeProjectRepos(
       },
     },
   ]);
+  await runPostRemove(ctx, tx, "post-repo-remove", postRepoRemove, {
+    cwd: projectDir,
+    env: env("post-repo-remove", stay),
+    done:
+      repos.length === 1
+        ? `The repo ${list} is removed.`
+        : `The repos ${list} are removed.`,
+  });
 
   return {
     projectDir,

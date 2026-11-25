@@ -68,12 +68,16 @@ describe("hookEnv", () => {
 });
 
 describe("hookVars", () => {
-  test("CROSSREPO_HOOK is any of the 4 hook names", () => {
+  test("CROSSREPO_HOOK is any of the 8 hook names", () => {
     const hooks: HookName[] = [
       "pre-create",
       "post-create",
       "pre-remove",
       "post-remove",
+      "pre-repo-add",
+      "post-repo-add",
+      "pre-repo-remove",
+      "post-repo-remove",
     ];
     for (const hook of hooks) {
       expect(
@@ -84,13 +88,14 @@ describe("hookVars", () => {
           projectName: "x",
           branch: "x",
           repos: [],
+          changed: [],
           hook,
         }).CROSSREPO_HOOK,
       ).toBe(hook);
     }
   });
 
-  test("gives the 7 built-in vars, repos one per line in order", () => {
+  test("gives the 8 built-in vars, repos one per line in order", () => {
     expect(
       hookVars({
         codebasePath: "/c",
@@ -99,7 +104,8 @@ describe("hookVars", () => {
         projectName: "feat--x",
         branch: "feat/x",
         repos: ["api", "web"],
-        hook: "post-create",
+        changed: ["web"],
+        hook: "post-repo-add",
       }),
     ).toEqual({
       CROSSREPO_CODEBASE_PATH: "/c",
@@ -108,7 +114,8 @@ describe("hookVars", () => {
       CROSSREPO_PROJECT_NAME: "feat--x",
       CROSSREPO_PROJECT_BRANCH: "feat/x",
       CROSSREPO_PROJECT_REPOS: "api\nweb",
-      CROSSREPO_HOOK: "post-create",
+      CROSSREPO_REPOS: "web",
+      CROSSREPO_HOOK: "post-repo-add",
     });
   });
 });

@@ -76,7 +76,7 @@ On native Windows, hooks run with the `sh.exe` of [Git for Windows](https://gitf
 
 ## Hooks run as you
 
-Hooks are shell commands in your config that `xr` runs before and after `xr project create` and `xr project remove`: `pre-create`, `post-create`, `pre-remove` and `post-remove`. They run as your user, with your rights, and with no trust step: `xr` does not ask before it runs a hook from a codebase config. Read the hooks of a codebase with `xr config show` before you use it. See [SECURITY.md](https://github.com/alexsuprun/crossrepo/blob/master/SECURITY.md) and the [hooks guide](https://alexsuprun.github.io/crossrepo/guides/hooks/).
+Hooks are shell commands in your config that `xr` runs before and after `xr project create`, `xr project remove`, `xr project repo add` and `xr project repo remove`: `pre-create`, `post-create`, `pre-remove`, `post-remove`, `pre-repo-add`, `post-repo-add`, `pre-repo-remove` and `post-repo-remove`. They run as your user, with your rights, and with no trust step: `xr` does not ask before it runs a hook from a codebase config. Read the hooks of a codebase with `xr config show` before you use it. See [SECURITY.md](https://github.com/alexsuprun/crossrepo/blob/master/SECURITY.md) and the [hooks guide](https://alexsuprun.github.io/crossrepo/guides/hooks/).
 
 ## Remote protocol
 

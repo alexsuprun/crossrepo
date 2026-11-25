@@ -1,8 +1,10 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Ctx, Tx } from "../domain/ctx.ts";
+import { type HookName, hookEnv, hookVars } from "../domain/project.ts";
 import type { RepoItem } from "../domain/report.ts";
 import { XrError } from "../errors/index.ts";
 import { projectAgentsText, writeAgentsStep } from "./agents-md.ts";
+import { runHookSteps } from "./hooks.ts";
 import {
   CLONE_HINT,
   checkKnownRepos,
@@ -58,11 +60,16 @@ export async function repoAddNames(
  * The checks and steps of `xr project repo add`, run inside a transaction that
  * holds the lock. The checks change nothing: each repo is known, on disk, not
  * in the project, has no folder or file at its worktree path, fetches, has a
- * default branch, and does not have the branch checked out. Then the steps add
- * the worktrees, write the record and `AGENTS.md`. Runs no hook (AD-11).
+ * default branch, does not have the branch checked out, `sh` is found when
+ * `pre-repo-add` or `post-repo-add` is set, and `pre-repo-add` passes. Then the
+ * steps add the worktrees, write the record and `AGENTS.md`, and run
+ * `post-repo-add`, so its failure undoes the add. Both hooks run in the project folder.
  */
 export async function addProjectRepos(
-  ctx: Pick<Ctx, "fs" | "git" | "out" | "config">,
+  ctx: Pick<
+    Ctx,
+    "fs" | "git" | "out" | "config" | "hooks" | "env" | "platform"
+  >,
   tx: Tx,
   codebase: string,
   target: ProjectEntry,
@@ -105,6 +112,8 @@ export async function addProjectRepos(
     branch,
     repos,
   );
+  const { preRepoAdd, postRepoAdd } = ctx.config;
+  if (preRepoAdd.length || postRepoAdd.length) ctx.hooks.findSh();
   const choices = await chooseBranches(
     ctx,
     signal,
@@ -113,6 +122,32 @@ export async function addProjectRepos(
     repos,
     defaults,
   );
+  const env = (hook: HookName, projectRepos: readonly string[]) =>
+    hookEnv(
+      ctx.env,
+      ctx.config.vars,
+      hookVars({
+        codebasePath: codebase,
+        codebaseName: ctx.config.name ?? basename(codebase),
+        projectPath: projectDir,
+        projectName: project.name,
+        branch,
+        repos: projectRepos,
+        changed: repos,
+        hook,
+      }),
+      ctx.platform,
+    );
+  const cleanup = (hook: HookName) => (command: string) => ({
+    what: `${hook} hook`,
+    path: projectDir,
+    command: `Undo by hand what \`${command}\` did, if anything.`,
+  });
+  await runHookSteps(ctx, tx, "pre-repo-add", preRepoAdd, {
+    cwd: projectDir,
+    env: env("pre-repo-add", project.repos),
+    cleanup: cleanup("pre-repo-add"),
+  });
 
   for (const repo of repos) {
     await addWorktreeStep(ctx, tx, {
@@ -155,6 +190,11 @@ export async function addProjectRepos(
     }),
     `Remove the ${list} lines from the \`## Codebase\` and \`## Repos\` sections of AGENTS.md by hand.`,
   );
+  await runHookSteps(ctx, tx, "post-repo-add", postRepoAdd, {
+    cwd: projectDir,
+    env: env("post-repo-add", newRepos),
+    cleanup: cleanup("post-repo-add"),
+  });
 
   return {
     projectDir,

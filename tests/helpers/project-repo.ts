@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import * as gitAdapter from "../../src/adapters/git/index.ts";
+import * as hooksAdapter from "../../src/adapters/hooks/index.ts";
 import { main } from "../../src/cli/index.ts";
 import { findSections } from "../../src/domain/agents-md.ts";
 import { git, makeRepos } from "./git.ts";
@@ -64,7 +65,7 @@ export function useProjectRepoEnv() {
     chdirs: [] as string[],
   };
 
-  function writeConfig() {
+  function writeConfig(extra = "") {
     const entry = (name: string, description: string) => [
       `  ${name}:`,
       `    remote: ${JSON.stringify(env.remotes[name])}`,
@@ -78,7 +79,7 @@ export function useProjectRepoEnv() {
         ...entry("api", "Public REST API"),
         ...entry("web", "Frontend"),
         ...entry("docs", "Docs site"),
-        "",
+        extra,
       ].join("\n"),
     );
   }
@@ -126,6 +127,31 @@ export function useProjectRepoEnv() {
     env.spies.push(
       spyOn(gitAdapter, "createGit").mockImplementation((options) =>
         wrap(real(options)),
+      ),
+    );
+  }
+
+  /** Puts hook lists, such as `{ "pre-repo-add": [...] }`, and optional vars YAML in the codebase config. */
+  function hooks(lists: Record<string, string[]>, vars = "") {
+    writeConfig(
+      [
+        "project:",
+        ...Object.entries(lists).flatMap(([name, lines]) => [
+          `  ${name}:`,
+          ...lines.map((line) => `    - ${JSON.stringify(line)}`),
+        ]),
+        vars,
+        "",
+      ].join("\n"),
+    );
+  }
+
+  /** Makes the hooks adapter find no `sh` for the rest of the test. */
+  function noSh() {
+    const real = hooksAdapter.createHooks;
+    env.spies.push(
+      spyOn(hooksAdapter, "createHooks").mockImplementation((options) =>
+        real({ ...options, platform: "win32", exists: () => false }),
       ),
     );
   }
@@ -212,6 +238,8 @@ export function useProjectRepoEnv() {
     run,
     json,
     fakeGit,
+    hooks,
+    noSh,
     branches,
     worktreePaths,
     record,

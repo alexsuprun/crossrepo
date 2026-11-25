@@ -580,6 +580,10 @@ describe("configView", () => {
       postCreate: [],
       preRemove: [],
       postRemove: [],
+      preRepoAdd: [],
+      postRepoAdd: [],
+      preRepoRemove: [],
+      postRepoRemove: [],
       vars: {},
       unknownKeys: [],
     });
@@ -598,7 +602,7 @@ describe("configView", () => {
     ).toEqual(unknownKeys);
   });
 
-  test("gives the codebase name, the 4 hook lists and the vars", () => {
+  test("gives the codebase name, the 8 hook lists and the vars", () => {
     const view = configView({
       ...base,
       values: {
@@ -608,6 +612,10 @@ describe("configView", () => {
           "post-create": ["a", "b"],
           "pre-remove": ["c"],
           "post-remove": ["d", "e"],
+          "pre-repo-add": ["f"],
+          "post-repo-add": ["g"],
+          "pre-repo-remove": ["h"],
+          "post-repo-remove": ["i"],
           vars: { PORT: "5432" },
         },
       },
@@ -617,6 +625,10 @@ describe("configView", () => {
     expect(view.preCreate).toEqual(["p"]);
     expect(view.preRemove).toEqual(["c"]);
     expect(view.postRemove).toEqual(["d", "e"]);
+    expect(view.preRepoAdd).toEqual(["f"]);
+    expect(view.postRepoAdd).toEqual(["g"]);
+    expect(view.preRepoRemove).toEqual(["h"]);
+    expect(view.postRepoRemove).toEqual(["i"]);
     expect(view.vars).toEqual({ PORT: "5432" });
   });
 });
