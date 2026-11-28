@@ -1,5 +1,11 @@
 # crossrepo
 
+## 0.4.3
+
+### Patch Changes
+
+- [#124](https://github.com/alexsuprun/crossrepo/pull/124) [`d7dc31b`](https://github.com/alexsuprun/crossrepo/commit/d7dc31b2814e50b29511b5861f292c9a70d4a3a5) Thanks [@alexsuprun](https://github.com/alexsuprun)! - Update bundled dependencies.
+
 ## 0.4.2
 
 ### Patch Changes
