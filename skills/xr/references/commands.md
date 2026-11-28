@@ -14,7 +14,8 @@ Options:
   --codebase-path <path>  path to the codebase
   --json                  print the result as one JSON object
   --no-interactive        never ask questions
-  --verbose               print the stack trace of an internal error
+  --verbose               print the stack trace of an internal error, and git's
+                          full output of `xr codebase pull`
   -h, --help              print this help
 
 Commands:

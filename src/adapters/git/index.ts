@@ -29,10 +29,11 @@ export interface Git {
   clone(url: string, dest: string, options?: GitCallOptions): Promise<void>;
   /**
    * `git -C <dir> pull --ff-only --no-rebase` on the checked-out branch, from its
-   * upstream: it never rebases or makes a merge commit (D35). git's stderr goes
-   * to the `stderr` option as it comes; a failure is a `GitError` with its end.
+   * upstream: it never rebases or makes a merge commit (D35). Gives the number of
+   * commits HEAD moved forward. git's output goes to the `stderr` option as it
+   * comes only with `verbose`; a failure is a `GitError` with its end.
    */
-  pull(dir: string, options?: GitCallOptions): Promise<void>;
+  pull(dir: string, options?: GitCallOptions): Promise<{ newCommits: number }>;
   /**
    * What a delete of the repo at `dir` would lose (D45). Reads only: it never
    * changes the repo, not even the index.
@@ -142,10 +143,12 @@ export interface CreateGitOptions {
   /** When false, git may never wait for a password or a prompt. */
   interactive: boolean;
   env: Readonly<Record<string, string | undefined>>;
-  /** Gets git's live stderr of `clone`, `pull` and `fetch`. Default: the process stderr. */
+  /** Gets git's live stderr of `clone`, `fetch`, and `pull` with `verbose`. Default: the process stderr. */
   stderr?: (text: string) => void;
-  /** Adds `--progress` to `clone`, `pull` and `fetch`; set it only when the process stderr is a TTY. */
+  /** Adds `--progress` to `clone`, `fetch`, and `pull` with `verbose`; set it only when the process stderr is a TTY. */
   progress?: boolean;
+  /** Shows git's output of `pull`. Default: `pull` keeps it for its `GitError` only. */
+  verbose?: boolean;
 }
 
 const MIN_VERSION = [2, 27] as const;
@@ -168,6 +171,7 @@ export function createGit({
   env,
   stderr = (text) => process.stderr.write(text),
   progress = false,
+  verbose = false,
 }: CreateGitOptions): Git {
   const gitEnv = buildEnv(env, interactive);
 
@@ -261,12 +265,13 @@ export function createGit({
 
   /**
    * Runs git with stderr streamed to `stderr`, unlike the buffered `exec`. With
-   * `showStdout`, git's stdout goes to `stderr` too, but is not kept.
+   * `showStdout`, git's stdout goes to `stderr` too, but is not kept. With
+   * `show: false`, nothing goes to `stderr`; the end of git's stderr is still kept.
    */
   function stream(
     args: readonly string[],
     signal?: AbortSignal,
-    showStdout = false,
+    { showStdout = false, show = true } = {},
   ): Promise<Result> {
     return new Promise((resolve, reject) => {
       const stopped = (message: string) =>
@@ -292,7 +297,7 @@ export function createGit({
       child.stdout?.on("data", (chunk: string) => stderr(chunk));
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
-        stderr(chunk);
+        if (show) stderr(chunk);
         kept = (kept + chunk).slice(-KEPT_STDERR);
       });
       child.on("error", (error) => {
@@ -391,6 +396,7 @@ export function createGit({
       }
     },
     async pull(dir, options) {
+      const signal = options?.signal;
       await checkVersion();
       const args = [
         "-C",
@@ -398,14 +404,15 @@ export function createGit({
         "pull",
         "--ff-only",
         "--no-rebase",
-        ...(progress ? ["--progress"] : []),
+        ...(progress && verbose ? ["--progress"] : []),
       ];
+      // `undefined` for an unborn branch.
+      const before = await revision(dir, "HEAD", signal);
       // The merge summary, such as `Already up to date.`, is on git's stdout.
-      const { exitCode, stderr: text } = await stream(
-        args,
-        options?.signal,
-        true,
-      );
+      const { exitCode, stderr: text } = await stream(args, signal, {
+        showStdout: verbose,
+        show: verbose,
+      });
       if (exitCode !== 0) {
         throw new GitError({
           args,
@@ -413,6 +420,19 @@ export function createGit({
           stderr: withoutProgress(text, FETCH_REPORT),
         });
       }
+      // No signal from here: a Ctrl-C now must not turn a done pull into a failure.
+      const after = await revision(dir, "HEAD");
+      if (after === undefined || after === before) return { newCommits: 0 };
+      const range = before === undefined ? after : `${before}..${after}`;
+      const count = await output([
+        "-C",
+        dir,
+        "rev-list",
+        "--count",
+        range,
+        "--",
+      ]);
+      return { newCommits: Number.parseInt(count, 10) };
     },
     async lossCheck(dir, options) {
       const signal = options?.signal;

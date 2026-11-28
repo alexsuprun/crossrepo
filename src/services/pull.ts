@@ -35,8 +35,9 @@ const HINTS: readonly [RegExp, (dir: string) => string][] = [
  * The per-repo work of `xr codebase pull`, for the `perRepo` runner. A missing
  * repo is skipped and a folder with no `.git` fails, with no git call; else it
  * runs `git pull --ff-only --no-rebase` on the checked-out branch, after one git
- * version check before the first pull. git reports
- * a detached HEAD or a missing upstream itself; the hint comes from its stderr.
+ * version check before the first pull, and gives the new commits as the message.
+ * git reports a detached HEAD or a missing upstream itself; the hint comes from
+ * its stderr.
  */
 export function pullPresent(
   ctx: Pick<Ctx, "fs" | "git">,
@@ -65,8 +66,8 @@ export function pullPresent(
       versionChecked = true;
     }
     try {
-      await git.pull(dir, { signal });
-      return { repo: name, status: "ok" };
+      const { newCommits } = await git.pull(dir, { signal });
+      return { repo: name, status: "ok", message: pullMessage(newCommits) };
     } catch (error) {
       if (signal.aborted) {
         return { repo: name, status: "skipped", message: "interrupted" };
@@ -81,6 +82,12 @@ export function pullPresent(
       };
     }
   };
+}
+
+/** The message of a pulled repo: `up to date`, `1 new commit` or `N new commits`. */
+function pullMessage(newCommits: number): string {
+  if (newCommits === 0) return "up to date";
+  return `${newCommits} new commit${newCommits === 1 ? "" : "s"}`;
 }
 
 /** The repo hint of `xr codebase pull` for git's stderr, or `undefined` when no text matches. */
