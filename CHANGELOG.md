@@ -1,5 +1,11 @@
 # crossrepo
 
+## 0.4.4
+
+### Patch Changes
+
+- [#127](https://github.com/alexsuprun/crossrepo/pull/127) [`d53f574`](https://github.com/alexsuprun/crossrepo/commit/d53f574f4b1b32cb189a38b23dc5ead052dfb2d1) Thanks [@alexsuprun](https://github.com/alexsuprun)! - `xr codebase pull` no longer prints git's own output. Each repo now gets one short line, such as `✓ api: 3 new commits`, `✓ web: up to date`, or `✗ cli: <git error>` with its hint. In JSON, the `message` of an `ok` repo is `N new commits`, `1 new commit` or `up to date`. Use the global `--verbose` flag to see git's full output as before; with `--json`, git's output is never shown.
+
 ## 0.4.3
 
 ### Patch Changes

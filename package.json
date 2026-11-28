@@ -1,6 +1,6 @@
 {
   "name": "crossrepo",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Create, sync and remove the same git worktree branch across many sibling repos with one command.",
   "keywords": [
     "ai-agents",
