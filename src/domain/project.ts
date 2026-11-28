@@ -50,7 +50,11 @@ export type HookName =
   | "pre-create"
   | "post-create"
   | "pre-remove"
-  | "post-remove";
+  | "post-remove"
+  | "pre-repo-add"
+  | "post-repo-add"
+  | "pre-repo-remove"
+  | "post-repo-remove";
 
 /** What the built-in `CROSSREPO_*` vars of a hook are made from. */
 export interface HookVarsInput {
@@ -61,10 +65,12 @@ export interface HookVarsInput {
   branch: string;
   /** In record order. */
   repos: readonly string[];
+  /** The repos the command adds or removes, in record order. */
+  changed: readonly string[];
   hook: HookName;
 }
 
-/** The 7 built-in vars of a hook line. */
+/** The 8 built-in vars of a hook line. */
 export function hookVars(input: HookVarsInput): Record<string, string> {
   return {
     CROSSREPO_CODEBASE_PATH: input.codebasePath,
@@ -73,6 +79,7 @@ export function hookVars(input: HookVarsInput): Record<string, string> {
     CROSSREPO_PROJECT_NAME: input.projectName,
     CROSSREPO_PROJECT_BRANCH: input.branch,
     CROSSREPO_PROJECT_REPOS: input.repos.join("\n"),
+    CROSSREPO_REPOS: input.changed.join("\n"),
     CROSSREPO_HOOK: input.hook,
   };
 }

@@ -42,6 +42,10 @@ To see the merged result and the file that gives each value, run [xr config show
 | `project.post-create` | A list of shell commands to run after `xr project create`. See the [hooks guide](../hooks/). |
 | `project.pre-remove` | A list of shell commands to run before `xr project remove` deletes anything. See the [hooks guide](../hooks/). |
 | `project.post-remove` | A list of shell commands to run after `xr project remove` has removed the project. See the [hooks guide](../hooks/). |
+| `project.pre-repo-add` | A list of shell commands to run in `xr project repo add` before it adds anything. See the [hooks guide](../hooks/). |
+| `project.post-repo-add` | A list of shell commands to run after `xr project repo add`. See the [hooks guide](../hooks/). |
+| `project.pre-repo-remove` | A list of shell commands to run before `xr project repo remove` deletes anything. See the [hooks guide](../hooks/). |
+| `project.post-repo-remove` | A list of shell commands to run after `xr project repo remove` has removed the repos. See the [hooks guide](../hooks/). |
 | `project.vars` | Your own variables for hooks. See the [hooks guide](../hooks/#your-own-variables). |
 
 The `repos:` list decides which repos the codebase has. A repo folder that is not in the list is not a repo of the codebase.

@@ -36,7 +36,7 @@ Ctrl-C during steps 3 to 5 undoes the steps that are done: `.crossrepo/` is dele
 
 ## The config
 
-Each repo gets its `remote`, its `default-branch` and an empty `description`. The file also has 4 hook examples that are commented out, one for each hook: `pre-create` stops the create when a tool is missing, `post-create` copies untracked files such as `.env` into each new worktree, `pre-remove` stops a remove when a worktree has commits that are not pushed, and `post-remove` cleans up what `post-create` started outside the project folder. See the [hooks guide](../../guides/hooks/).
+Each repo gets its `remote`, its `default-branch` and an empty `description`. The file also has 4 hook examples that are commented out, one for each create and remove hook: `pre-create` stops the create when a tool is missing, `post-create` copies untracked files such as `.env` into each new worktree, `pre-remove` stops a remove when a worktree has commits that are not pushed, and `post-remove` cleans up what `post-create` started outside the project folder. The repo hooks, such as `pre-repo-remove`, have no example in it. See the [hooks guide](../../guides/hooks/).
 
 ```yaml
 # crossrepo codebase config. Docs: https://alexsuprun.github.io/crossrepo/

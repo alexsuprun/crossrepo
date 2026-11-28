@@ -114,6 +114,25 @@ describe("xr config show in a codebase", () => {
     expect(text.stdout).not.toContain("user-a");
   });
 
+  test("the 4 repo hook lists show with their source", async () => {
+    writeFile(
+      codebaseFile,
+      "project:\n  pre-repo-add: [a]\n  post-repo-add: [b]\n  pre-repo-remove: [c]\n  post-repo-remove: [d]\n",
+    );
+    const result = await json(["config", "show"]);
+    expect(result.code).toBe(0);
+    expect(
+      result.data.entries.filter(({ key }: { key: string }) =>
+        key.startsWith("project."),
+      ),
+    ).toEqual([
+      { key: "project.pre-repo-add", value: ["a"], source: codebaseFile },
+      { key: "project.post-repo-add", value: ["b"], source: codebaseFile },
+      { key: "project.pre-repo-remove", value: ["c"], source: codebaseFile },
+      { key: "project.post-repo-remove", value: ["d"], source: codebaseFile },
+    ]);
+  });
+
   test("repos.<name>.always shows as true or false", async () => {
     writeFile(
       codebaseFile,

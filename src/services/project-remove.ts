@@ -131,6 +131,7 @@ export async function removeProject(
         projectName: project.name,
         branch,
         repos,
+        changed: repos,
         hook,
       }),
       ctx.platform,
@@ -184,7 +185,11 @@ export async function removeProject(
       warning: programsStillRunning(project.name, realProjectDir, programs),
     });
   }
-  await runPostRemove(ctx, tx, postRemove, codebase, env("post-remove"));
+  await runPostRemove(ctx, tx, "post-remove", postRemove, {
+    cwd: codebase,
+    env: env("post-remove"),
+    done: "The project is removed.",
+  });
 
   return {
     projectDir,
@@ -197,30 +202,34 @@ export async function removeProject(
 }
 
 /**
- * The `post-remove` lines, one at a time, after the delete phase. The first
- * failed line, or a Ctrl-C, ends the hook with a `hook-failed` warning: the
- * project is gone, so nothing can be undone and the remove still succeeds.
+ * The lines of a post-remove hook, one at a time, after the delete phase. The
+ * first failed line, or a Ctrl-C, ends the hook with a `hook-failed` warning
+ * whose hint starts with `done`: nothing can be undone, so the command still succeeds.
  */
-async function runPostRemove(
+export async function runPostRemove(
   ctx: Pick<Ctx, "hooks" | "out">,
   tx: Tx,
+  hook: HookName,
   lines: readonly string[],
-  codebase: string,
-  env: Readonly<Record<string, string>>,
+  {
+    cwd,
+    env,
+    done,
+  }: { cwd: string; env: Readonly<Record<string, string>>; done: string },
 ): Promise<void> {
   for (const [index, command] of lines.entries()) {
     try {
-      await runHookSteps(ctx, tx, "post-remove", [command], {
-        cwd: codebase,
+      await runHookSteps(ctx, tx, hook, [command], {
+        cwd,
         env,
         cleanup: (line) => ({
-          what: "post-remove hook",
-          path: codebase,
+          what: `${hook} hook`,
+          path: cwd,
           command: `Undo by hand what \`${line}\` did, if anything.`,
         }),
       });
     } catch (error) {
-      const warning = hookWarning("post-remove", error, lines.slice(index));
+      const warning = hookWarning(hook, error, lines.slice(index), done);
       if (!warning) throw error;
       ctx.out.emit({ type: "warning", warning });
       return;

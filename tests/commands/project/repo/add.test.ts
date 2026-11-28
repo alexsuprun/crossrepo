@@ -1,5 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import * as promptAdapter from "../../../../src/adapters/prompt/index.ts";
 import { afterCall, withFault } from "../../../helpers/faults.ts";
@@ -409,5 +415,97 @@ describe("xr project repo add: undo", () => {
     expect(t.state()).toEqual(before);
     expect(existsSync(env.lockFile)).toBe(false);
     expect(readdirSync(env.login).sort()).toEqual(before.login ?? []);
+  });
+});
+
+describe("xr project repo add: hooks", () => {
+  const lines = (file: string) =>
+    readFileSync(file, "utf8").trim().split(/\r?\n/);
+
+  test("pre-repo-add sees the repos before, post-repo-add after, both in the project folder", async () => {
+    const pre = join(env.iso.root, "pre.txt");
+    const post = join(env.iso.root, "post.txt");
+    const show = (out: string) =>
+      `{ basename "$PWD"; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_REPOS"; echo "--"; echo "$CROSSREPO_REPOS"; if [ -e web ]; then echo has-web; else echo no-web; fi; } > "${out}"`;
+    t.hooks({ "pre-repo-add": [show(pre)], "post-repo-add": [show(post)] });
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(lines(pre)).toEqual([
+      "feat--login",
+      "pre-repo-add",
+      "api",
+      "--",
+      "web",
+      "no-web",
+    ]);
+    expect(lines(post)).toEqual([
+      "feat--login",
+      "post-repo-add",
+      "api",
+      "web",
+      "--",
+      "web",
+      "has-web",
+    ]);
+    expect(result.stderr).toContain("pre-repo-add: {");
+  });
+
+  test("a failing pre-repo-add: hook-failed, nothing changes", async () => {
+    t.hooks({ "pre-repo-add": ["echo before; exit 3", "echo never"] });
+    const before = t.state();
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("hook-failed");
+    expect(result.data.error.message).toBe(
+      "The pre-repo-add hook `echo before; exit 3` failed with exit code 3.",
+    );
+    expect(result.data.error.hint).toContain("project.pre-repo-add");
+    expect(t.state()).toEqual(before);
+    expect(result.stderr).not.toContain("never");
+  });
+
+  test("a failing post-repo-add: hook-failed, the add is undone", async () => {
+    t.hooks({ "post-repo-add": ["exit 1"] });
+    const before = t.state();
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.code).toBe(1);
+    expect(result.data.error.code).toBe("hook-failed");
+    expect(result.data.error.message).toContain("post-repo-add");
+    expect(t.state()).toEqual(before);
+    expect(t.branches("web")).toEqual(["main"]);
+  });
+
+  test("a failed check runs no hook", async () => {
+    const marker = join(env.iso.root, "ran.txt");
+    t.hooks({ "pre-repo-add": [`touch "${marker}"`] });
+    const result = await t.json([...ADD, "api"], { cwd: env.login });
+    expect(result.data.error.code).toBe("repo-already-in-project");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("no sh with only post-repo-add set: sh-not-found, nothing changes", async () => {
+    t.hooks({ "post-repo-add": ["true"] });
+    t.noSh();
+    const before = t.state();
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.data.error.code).toBe("sh-not-found");
+    expect(t.state()).toEqual(before);
+  });
+
+  test("hooks of the other commands only: no sh lookup, the add succeeds", async () => {
+    t.hooks({ "pre-repo-remove": ["exit 1"], "post-remove": ["exit 1"] });
+    t.noSh();
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(t.recordRepos()).toEqual(["api", "web"]);
+  });
+
+  test("a reserved var name: reserved-var-name before any change", async () => {
+    t.hooks({}, "  vars:\n    CROSSREPO_X: 1");
+    const before = t.state();
+    const result = await t.json([...ADD, "web"], { cwd: env.login });
+    expect(result.data.error.code).toBe("reserved-var-name");
+    expect(t.state()).toEqual(before);
+    expect(existsSync(env.lockFile)).toBe(false);
   });
 });

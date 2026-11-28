@@ -34,6 +34,10 @@ const ALLOWED_WORDS = [
   "post-create",
   "pre-remove",
   "post-remove",
+  "pre-repo-add",
+  "post-repo-add",
+  "pre-repo-remove",
+  "post-repo-remove",
 ];
 const KNOWN_TOKENS = new Set<string>([
   ...ERROR_CODES,

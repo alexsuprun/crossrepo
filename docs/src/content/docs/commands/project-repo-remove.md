@@ -35,8 +35,10 @@ The command takes the codebase lock, then runs these checks. None of them change
 1. Each repo is in the project, else `repo-not-found` with the hint `xr project repo list`.
 2. At least one repo stays in the project, else `last-repo`. To remove the whole project, use [xr project remove](../project-remove/).
 3. In each worktree folder that exists, no changed, staged or untracked file that git does not ignore, else `uncommitted-changes`. The hint names the command with `--force`. Commits that are not pushed, stashes and ignored files do not count. `--force` skips this check.
+4. When `pre-repo-remove` or `post-repo-remove` is set, `sh` must be found, else `sh-not-found`.
+5. The `pre-repo-remove` hook runs in the project folder, while the worktrees still exist. A failed line stops the command with `hook-failed`, and nothing changes. `--force` does not skip it.
 
-A worktree folder that is missing, for example one you deleted by hand, is not a failure. Other folders in the project folder are not checked. No hook runs, also not `pre-remove`.
+A worktree folder that is missing, for example one you deleted by hand, is not a failure. Other folders in the project folder are not checked. The command runs `pre-repo-remove` and `post-repo-remove`, not `pre-remove` or `post-remove`. See the [hooks guide](../../guides/hooks/).
 
 ## Steps
 
@@ -46,6 +48,7 @@ When every check passes, the delete phase runs these steps in this order:
 2. **Delete branch `<repo>`**, one step per repo, only with `--delete-branch`: `git branch -d <branch>`, never `-D`. An unmerged branch stays, with the warning `branch-not-merged`.
 3. **Write project record**: the record without these repos. The `created` time stays.
 4. **Write AGENTS.md**: only the `## Codebase` and `## Repos` sections of the project `AGENTS.md` change.
+5. One step for each `post-repo-remove` line, in the project folder. A failed or stopped line is a `hook-failed` warning, and the exit code stays 0. When an earlier step fails, `post-repo-remove` does not run.
 
 So the record changes only after the worktrees are gone. These steps have no undo. When a step fails, the command stops, and `error.details.leftovers` lists the step that failed and every step that did not run, each with the command to finish it by hand. When you press Ctrl-C during these steps, the running step ends first, then the command stops with the leftovers and exits with code 130.
 
@@ -87,15 +90,24 @@ A repo with an unmerged branch has `hint`, the `git branch -D` command. `notes` 
 | --- | --- |
 | `missing-argument` | No project or no repo, and no picker can open. The exit code is 2. |
 | `not-a-codebase` | The folder is not a codebase or a project folder. |
+| `reserved-var-name` | A `project.vars` name starts with `CROSSREPO_`, in any case. The hint is `xr codebase doctor`. It comes first, before the pickers: no lock, no change. |
 | `project-not-found` | No project has the name of `--project`, or the project record is gone by the time the lock is taken. Nothing changes. |
 | `invalid-project-record` | The record of the current project folder is not valid, or the record of the chosen project is not valid when it is read again inside the lock. Nothing changes. For another project it is a warning, and that project is skipped. |
 | `repo-not-found` | A repo is not in the project. Nothing changes. |
 | `last-repo` | The command would remove every repo of the project. The hint is `xr project remove`. Nothing changes. |
 | `uncommitted-changes` | A worktree has changed, staged or untracked files. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. Nothing changes. |
+| `sh-not-found` | `pre-repo-remove` or `post-repo-remove` is set, and Windows has no Git for Windows `sh.exe`. Nothing changes. |
+| `hook-failed` | A `pre-repo-remove` line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`. Nothing changes. |
 | `git-failed` | A git command failed. In the delete phase, `error.details.leftovers` lists what is left. |
 | `lock-held` | Another `xr` command holds the lock of this codebase. Nothing changes. |
 | `interrupted` | You pressed Ctrl-C, or Ctrl-C or Escape in a picker. In the delete phase, `error.details.leftovers` lists what is left. The exit code is 130. |
 
-Warning codes: `branch-not-merged`, and `invalid-project-record` for another project that the lookup skips, as in [xr project remove](../project-remove/#errors).
+Warning codes, in `warnings`:
+
+| Code | When |
+| --- | --- |
+| `branch-not-merged` | `--delete-branch` kept a branch that git says is not merged. The hint has the `git branch -D` command. The exit code stays 0. |
+| `invalid-project-record` | The record of another project is not valid. That project is skipped. |
+| `hook-failed` | A `post-repo-remove` line failed, timed out, or was stopped by Ctrl-C. The repos are removed. The hint starts with "The repo web is removed." or "The repos web, docs are removed." and names the failed or stopped line and every line after it. `lines` has the last 20 lines of the output, when the line printed any. The exit code stays 0. |
 
 See [Output and errors](../../output/) for the exit codes.

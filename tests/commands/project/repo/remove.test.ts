@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import * as hooksAdapter from "../../../../src/adapters/hooks/index.ts";
 import * as promptAdapter from "../../../../src/adapters/prompt/index.ts";
 import { afterCall, withFault } from "../../../helpers/faults.ts";
 import { git } from "../../../helpers/git.ts";
@@ -425,5 +426,169 @@ describe("xr project repo remove of the current folder", () => {
     expect(result.code).toBe(0);
     expect(env.chdirs).toEqual([]);
     expect(result.data.notes).toBeUndefined();
+  });
+});
+
+describe("xr project repo remove: hooks", () => {
+  const lines = (file: string) =>
+    readFileSync(file, "utf8").trim().split(/\r?\n/);
+
+  test("pre-repo-remove sees the repos before with the worktree still there, post-repo-remove after", async () => {
+    const pre = join(env.iso.root, "pre.txt");
+    const post = join(env.iso.root, "post.txt");
+    const show = (out: string) =>
+      `{ basename "$PWD"; echo "$CROSSREPO_HOOK"; echo "$CROSSREPO_PROJECT_REPOS"; echo "--"; echo "$CROSSREPO_REPOS"; if [ -e web ]; then echo has-web; else echo no-web; fi; } > "${out}"`;
+    t.hooks({
+      "pre-repo-remove": [show(pre)],
+      "post-repo-remove": [show(post)],
+    });
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([]);
+    expect(lines(pre)).toEqual([
+      "feat--login",
+      "pre-repo-remove",
+      "api",
+      "web",
+      "docs",
+      "--",
+      "web",
+      "has-web",
+    ]);
+    expect(lines(post)).toEqual([
+      "feat--login",
+      "post-repo-remove",
+      "api",
+      "docs",
+      "--",
+      "web",
+      "no-web",
+    ]);
+  });
+
+  test("pre-repo-remove can save an ignored folder before the worktree goes", async () => {
+    writeFile(
+      join(env.codebase, "web", ".git", "info", "exclude"),
+      "ai-docs/\n",
+    );
+    writeFile(join(env.login, "web", "ai-docs", "notes.md"), "keep\n");
+    const saved = join(env.iso.root, "saved");
+    t.hooks({
+      "pre-repo-remove": [
+        `mv "$CROSSREPO_PROJECT_PATH/web/ai-docs" "${saved}"`,
+      ],
+    });
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(saved, "notes.md"), "utf8")).toBe("keep\n");
+    expect(existsSync(join(env.login, "web"))).toBe(false);
+  });
+
+  test("a failing pre-repo-remove: hook-failed, nothing changes, also with --force", async () => {
+    t.hooks({ "pre-repo-remove": ["exit 3"] });
+    const before = t.state();
+    for (const extra of [[], ["--force", "--delete-branch"]]) {
+      const result = await t.json([...REMOVE, "web", ...extra], {
+        cwd: env.login,
+      });
+      expect(result.code).toBe(1);
+      expect(result.data.error.code).toBe("hook-failed");
+      expect(result.data.error.message).toContain("pre-repo-remove");
+      expect(t.state()).toEqual(before);
+    }
+  });
+
+  test("the uncommitted check runs before pre-repo-remove", async () => {
+    const marker = join(env.iso.root, "ran.txt");
+    t.hooks({ "pre-repo-remove": [`touch "${marker}"`] });
+    writeFile(join(env.login, "web", "a.txt"), "1\n");
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.data.error.code).toBe("uncommitted-changes");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("a failing post-repo-remove: exit 0 with a hook-failed warning, the repos are removed", async () => {
+    const never = join(env.iso.root, "never.txt");
+    t.hooks({ "post-repo-remove": ["echo out; exit 4", `touch "${never}"`] });
+    const result = await t.json([...REMOVE, "web", "docs"], {
+      cwd: env.login,
+    });
+    expect(result.code).toBe(0);
+    expect(result.data.warnings).toEqual([
+      {
+        code: "hook-failed",
+        message:
+          "The post-repo-remove hook `echo out; exit 4` failed with exit code 4.",
+        hint: `The repos web, docs are removed. Fix the line in \`project.post-repo-remove\`, then run by hand the lines that did not run: \`echo out; exit 4\`, \`touch "${never}"\`.`,
+        lines: ["out"],
+      },
+    ]);
+    expect(existsSync(never)).toBe(false);
+    expect(t.recordRepos()).toEqual(["api"]);
+    expect(existsSync(env.lockFile)).toBe(false);
+  });
+
+  test("Ctrl-C between post-repo-remove lines: the rest do not run, a warning, exit 0", async () => {
+    t.hooks({ "post-repo-remove": ["first", "second"] });
+    const ran: string[] = [];
+    const real = hooksAdapter.createHooks;
+    env.spies.push(
+      spyOn(hooksAdapter, "createHooks").mockImplementation((options) => ({
+        ...real(options),
+        run: async ({ command }) => {
+          ran.push(command);
+          if (command === "first") env.interrupts.fire();
+          return { ok: true };
+        },
+      })),
+    );
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(ran).toEqual(["first"]);
+    expect(result.data.warnings).toEqual([
+      {
+        code: "hook-failed",
+        message:
+          "The post-repo-remove hook was stopped by Ctrl-C before `second` ran.",
+        hint: "The repo web is removed. Run by hand the lines that did not run, if they are needed: `second`.",
+      },
+    ]);
+    expect(t.recordRepos()).toEqual(["api", "docs"]);
+  });
+
+  test("a failed remove step: error, post-repo-remove does not run", async () => {
+    const marker = join(env.iso.root, "ran.txt");
+    t.hooks({ "post-repo-remove": [`touch "${marker}"`] });
+    t.fakeGit((g) => withFault(g, "worktreeRemove", 1));
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.code).toBe(1);
+    expect(result.data.error.message).toContain("fault in worktreeRemove");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("no sh with only post-repo-remove set: sh-not-found, nothing changes", async () => {
+    t.hooks({ "post-repo-remove": ["true"] });
+    t.noSh();
+    const before = t.state();
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.data.error.code).toBe("sh-not-found");
+    expect(t.state()).toEqual(before);
+  });
+
+  test("hooks of the other commands only: no sh lookup, the remove succeeds", async () => {
+    t.hooks({ "pre-repo-add": ["exit 1"], "pre-remove": ["exit 1"] });
+    t.noSh();
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.code).toBe(0);
+    expect(t.recordRepos()).toEqual(["api", "docs"]);
+  });
+
+  test("a reserved var name: reserved-var-name before any change", async () => {
+    t.hooks({}, "  vars:\n    CROSSREPO_X: 1");
+    const before = t.state();
+    const result = await t.json([...REMOVE, "web"], { cwd: env.login });
+    expect(result.data.error.code).toBe("reserved-var-name");
+    expect(t.state()).toEqual(before);
+    expect(existsSync(env.lockFile)).toBe(false);
   });
 });

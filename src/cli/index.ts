@@ -311,6 +311,10 @@ export function configView({
     postCreate: values.project?.["post-create"] ?? [],
     preRemove: values.project?.["pre-remove"] ?? [],
     postRemove: values.project?.["post-remove"] ?? [],
+    preRepoAdd: values.project?.["pre-repo-add"] ?? [],
+    postRepoAdd: values.project?.["post-repo-add"] ?? [],
+    preRepoRemove: values.project?.["pre-repo-remove"] ?? [],
+    postRepoRemove: values.project?.["post-repo-remove"] ?? [],
     vars: values.project?.vars ?? {},
     unknownKeys,
   };

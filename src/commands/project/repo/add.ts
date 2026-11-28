@@ -1,5 +1,6 @@
 import { type CommandUnit, codebaseDir } from "../../../domain/ctx.ts";
 import { transaction } from "../../../runners/transaction.ts";
+import { rejectReservedVars } from "../../../services/doctor-checks.ts";
 import {
   addProjectRepos,
   repoAddNames,
@@ -11,6 +12,7 @@ export const projectRepoAdd: CommandUnit = {
   accepts: ["codebase", "project"],
   async run(ctx, args, options = {}) {
     const codebase = codebaseDir(ctx.discovery);
+    rejectReservedVars(ctx.config);
     // Both pickers run before the transaction, so no lock is held while the user picks.
     const project = await targetProject(
       ctx,

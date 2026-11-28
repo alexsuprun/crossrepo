@@ -48,6 +48,14 @@ export interface ConfigView {
   preRemove: string[];
   /** The merged `project.post-remove` lines, in order. */
   postRemove: string[];
+  /** The merged `project.pre-repo-add` lines, in order. */
+  preRepoAdd: string[];
+  /** The merged `project.post-repo-add` lines, in order. */
+  postRepoAdd: string[];
+  /** The merged `project.pre-repo-remove` lines, in order. */
+  preRepoRemove: string[];
+  /** The merged `project.post-repo-remove` lines, in order. */
+  postRepoRemove: string[];
   /** The merged `project.vars`; numbers and booleans are text already. */
   vars: Record<string, string>;
   /** The keys of any level that the schema does not know, with the files that set them. */

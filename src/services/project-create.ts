@@ -191,6 +191,7 @@ export async function createProject(
         projectName: slug,
         branch,
         repos,
+        changed: repos,
         hook,
       }),
       ctx.platform,

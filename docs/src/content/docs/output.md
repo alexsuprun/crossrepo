@@ -108,7 +108,7 @@ Without `--json`, an error goes to stderr and stdout stays empty.
 | `project-exists` | `xr project create` found a folder at the project path already. `error.details.path` is the path. |
 | `branch-in-use` | `xr project create` or `xr project repo add` got a branch that is checked out in the codebase repo or in another worktree. `error.details` is `{ "repo", "path" }`. |
 | `no-default-branch` | `xr project create` or `xr project repo add` found no default branch for a repo: no `default-branch` in the config and no `origin/HEAD`. |
-| `hook-failed` | A `pre-create`, `post-create` or `pre-remove` line failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. A failed `post-remove` line is a warning instead, see below. |
+| `hook-failed` | A hook line other than `post-remove` and `post-repo-remove` failed or timed out. `error.details` has `command`, `exitCode`, `timedOut` and `hookOutput.lines`, the last 20 lines of its output. A failed `post-remove` or `post-repo-remove` line is a warning instead, see below. |
 | `sh-not-found` | A hook must run, and Windows has no Git for Windows `sh.exe`. |
 | `project-not-found` | No project of this codebase has the given folder name or branch. `error.details.project` is the name. Run `xr project list` to see the projects. |
 | `uncommitted-changes` | `xr project remove` or `xr project repo remove` found changed, staged or untracked files that git does not ignore in a worktree of the project. `error.details.worktrees` lists each worktree as `{ "repo", "path", "files" }`. Nothing changes. Use `--force` to remove anyway. |
@@ -128,7 +128,7 @@ Warning codes, in `warnings`:
 | `stale-lock` | The codebase lock belonged to a process that is not running any more, so `xr` took it over. The message has the old process ID. |
 | `programs-still-running` | `xr project remove` removed the project, but programs, such as a dev server, still run in a folder of it. `lines` has the PID, command and folder of each one. The exit code stays 0. |
 | `branch-not-merged` | `xr project remove --delete-branch` kept a branch because git says it is not merged. The hint has the `git branch -D` command to delete it anyway. The exit code stays 0. |
-| `hook-failed` | A `post-remove` line of `xr project remove` failed, timed out, or was stopped by Ctrl-C, after the project was removed. `lines` has the last 20 lines of its output. The exit code stays 0. |
+| `hook-failed` | A `post-remove` line of `xr project remove`, or a `post-repo-remove` line of `xr project repo remove`, failed, timed out, or was stopped by Ctrl-C, after the project or the repos were removed. `lines` has the last 20 lines of its output. The exit code stays 0. |
 
 New commands add new codes. A script must handle a code that it does not know as a failure.
 

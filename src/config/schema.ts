@@ -19,6 +19,10 @@ const projectShape = {
   "post-create": list,
   "pre-remove": list,
   "post-remove": list,
+  "pre-repo-add": list,
+  "post-repo-add": list,
+  "pre-repo-remove": list,
+  "post-repo-remove": list,
   vars: z.record(z.string(), varValue).nullish(),
 };
 const rootShape = { name: text, "projects-dir": z.string().min(1).nullish() };
@@ -62,6 +66,10 @@ export interface ConfigValues {
     "post-create"?: string[];
     "pre-remove"?: string[];
     "post-remove"?: string[];
+    "pre-repo-add"?: string[];
+    "post-repo-add"?: string[];
+    "pre-repo-remove"?: string[];
+    "post-repo-remove"?: string[];
     vars?: Record<string, string>;
   };
 }
