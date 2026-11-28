@@ -172,7 +172,7 @@ describe("createGit pull", () => {
     return { dir, origin };
   }
 
-  test("fast-forwards the checked-out branch and streams all git output to stderr", async () => {
+  test("fast-forwards the checked-out branch, gives the new commits and streams nothing by default", async () => {
     const { dir, origin } = cloned();
     const head = pushCommit(origin);
     let streamed = "";
@@ -182,15 +182,62 @@ describe("createGit pull", () => {
       stderr: (text) => {
         streamed += text;
       },
+      progress: true,
     });
-    await adapter.pull(dir);
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 1 });
     expect(git(dir, "rev-parse", "HEAD").trim()).toBe(head);
     expect(git(dir, "branch", "--show-current")).toBe("main\n");
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 0 });
+    expect(streamed).toBe("");
+  });
+
+  test("counts every new commit", async () => {
+    const { dir, origin } = cloned();
+    pushCommit(origin);
+    pushCommit(origin);
+    const head = pushCommit(origin);
+    const adapter = createGit({ interactive: false, env: env() });
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 3 });
+    expect(git(dir, "rev-parse", "HEAD").trim()).toBe(head);
+  });
+
+  test("an unborn branch counts every commit it gets", async () => {
+    const origin = join(iso.root, "up", "empty.git");
+    mkdirSync(origin, { recursive: true });
+    git(origin, "init", "--quiet", "--bare");
+    const dir = join(root, "api");
+    git(root, "clone", "--quiet", origin, "api");
+    const branch = git(dir, "symbolic-ref", "--short", "HEAD").trim();
+    const work = join(iso.root, "work");
+    git(iso.root, "clone", "--quiet", origin, "work");
+    git(work, "checkout", "--quiet", "-b", branch);
+    git(work, "commit", "--quiet", "--allow-empty", "-m", "one");
+    git(work, "commit", "--quiet", "--allow-empty", "-m", "two");
+    git(work, "push", "--quiet", "origin", branch);
+    const head = git(work, "rev-parse", "HEAD").trim();
+    const adapter = createGit({ interactive: false, env: env() });
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 2 });
+    expect(git(dir, "rev-parse", "HEAD").trim()).toBe(head);
+  });
+
+  test("verbose: streams all git output to stderr", async () => {
+    const { dir, origin } = cloned();
+    pushCommit(origin);
+    let streamed = "";
+    const adapter = createGit({
+      interactive: false,
+      env: env(),
+      stderr: (text) => {
+        streamed += text;
+      },
+      verbose: true,
+    });
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 1 });
     // git prints the fetch to stderr and the merge summary to stdout.
     expect(streamed).toMatch(/main +-> origin\/main/);
     expect(streamed).toContain("Fast-forward");
     streamed = "";
-    await adapter.pull(dir);
+    expect(await adapter.pull(dir)).toEqual({ newCommits: 0 });
     expect(streamed).toContain("Already up to date.");
   });
 
@@ -685,25 +732,34 @@ describe.skipIf(process.platform === "win32")(
       expect(early).toMatchObject({ exitCode: null });
     });
 
-    test("pull runs `git -C <dir> pull --ff-only --no-rebase`, with --progress only when asked", async () => {
+    test("pull runs `git -C <dir> pull --ff-only --no-rebase`, with --progress only when verbose and asked", async () => {
       const fake = fakeGit("2.40.0");
-      await createGit({
-        interactive: false,
-        env: fake.env,
-        stderr: () => {},
-      }).pull(join(root, "api"));
-      await createGit({
-        interactive: false,
-        env: fake.env,
-        stderr: () => {},
-        progress: true,
-      }).pull(join(root, "web"));
+      const options = { interactive: false, env: fake.env, stderr: () => {} };
+      for (const [name, extra] of [
+        ["api", {}],
+        ["web", { progress: true }],
+        ["docs", { progress: true, verbose: true }],
+      ] as const) {
+        expect(
+          await createGit({ ...options, ...extra }).pull(join(root, name)),
+        ).toEqual({ newCommits: 0 });
+      }
       const calls = readFileSync(fake.log, "utf8").trim().split("\n");
+      const head = (name: string) =>
+        `-C ${join(root, name)} rev-parse --quiet --verify HEAD`;
       expect(calls).toEqual([
         "version",
+        head("api"),
         `-C ${join(root, "api")} pull --ff-only --no-rebase`,
+        head("api"),
         "version",
-        `-C ${join(root, "web")} pull --ff-only --no-rebase --progress`,
+        head("web"),
+        `-C ${join(root, "web")} pull --ff-only --no-rebase`,
+        head("web"),
+        "version",
+        head("docs"),
+        `-C ${join(root, "docs")} pull --ff-only --no-rebase --progress`,
+        head("docs"),
       ]);
     });
 
@@ -726,6 +782,7 @@ describe.skipIf(process.platform === "win32")(
         [
           "#!/bin/sh",
           'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          'if [ "$3" = rev-parse ]; then exit 1; fi',
           "printf 'remote: Counting objects:  50%% (1/2)\\rremote: Counting objects: 100%% (2/2), done.\\n' >&2",
           "printf 'Unpacking objects:  45%% (9/20)\\rUnpacking objects: 100%% (20/20), done.\\n' >&2",
           "echo 'From /o/api' >&2",
@@ -740,43 +797,53 @@ describe.skipIf(process.platform === "win32")(
       );
       chmodSync(script, 0o755);
       let streamed = "";
-      const error = await createGit({
-        interactive: false,
-        env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
-        stderr: (text) => {
-          streamed += text;
-        },
-      })
-        .pull(join(root, "api"))
-        .catch((thrown: unknown) => thrown);
-      expect(error).toMatchObject({
+      const pull = (verbose: boolean) =>
+        createGit({
+          interactive: false,
+          env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
+          stderr: (text) => {
+            streamed += text;
+          },
+          verbose,
+        })
+          .pull(join(root, "api"))
+          .catch((thrown: unknown) => thrown);
+      const failed = {
         exitCode: 128,
         stderr:
           " ! [rejected]        v1         -> v1  (would clobber existing tag)\nhint: a hint\nfatal: Not possible to fast-forward, aborting.",
-      });
+      };
+      expect(await pull(false)).toMatchObject(failed);
+      expect(streamed).toBe("");
+      expect(await pull(true)).toMatchObject(failed);
       expect(streamed).toContain("Unpacking objects");
       expect(streamed).toContain("From /o/api");
     });
 
-    test("an aborted signal stops git pull: GitError with exitCode null", async () => {
+    test("an aborted signal stops a quiet git pull: GitError with exitCode null", async () => {
       const bin = join(iso.root, "slow-bin");
       const script = writeFile(
         join(bin, "git"),
         [
           "#!/bin/sh",
           'if [ "$1" = version ]; then echo "git version 2.40.0"; exit 0; fi',
+          'if [ "$3" = rev-parse ]; then exit 1; fi',
           "echo 'From /o/api' >&2",
           "exec sleep 10",
           "",
         ].join("\n"),
       );
       chmodSync(script, 0o755);
+      let streamed = "";
       const controller = new AbortController();
       const adapter = createGit({
         interactive: false,
         env: { ...env(), PATH: [bin, process.env.PATH].join(delimiter) },
-        stderr: () => controller.abort(),
+        stderr: (text) => {
+          streamed += text;
+        },
       });
+      setTimeout(() => controller.abort(), 500);
       const started = Date.now();
       const error = await adapter
         .pull(join(root, "api"), { signal: controller.signal })
@@ -784,6 +851,7 @@ describe.skipIf(process.platform === "win32")(
       expect(Date.now() - started).toBeLessThan(5000);
       expect(error).toBeInstanceOf(GitError);
       expect(error).toMatchObject({ code: "git-failed", exitCode: null });
+      expect(streamed).toBe("");
       const early = await adapter
         .pull(join(root, "web"), { signal: AbortSignal.abort() })
         .catch((thrown: unknown) => thrown);

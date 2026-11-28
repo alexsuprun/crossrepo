@@ -137,10 +137,11 @@ function interruptGit(nth: number) {
   let fired = false;
   spies.push(
     spyOn(gitAdapter, "createGit").mockImplementation((options) => {
+      // `verbose` sends git's output to the trigger; it is not shown.
       const inner = real({
         ...options,
-        stderr(text) {
-          options.stderr?.(text);
+        verbose: true,
+        stderr() {
           if (fired || pulls !== nth) return;
           fired = true;
           interrupts.fire();
@@ -167,7 +168,11 @@ function failPull(stderr: string) {
   }));
 }
 
-const ok = (repo: string) => ({ repo, status: "ok" });
+const ok = (repo: string, message = "up to date") => ({
+  repo,
+  status: "ok",
+  message,
+});
 const stopped = (repo: string) => ({
   repo,
   status: "skipped",
@@ -184,16 +189,10 @@ describe("xr codebase pull", () => {
     const result = await run(["--json", ...PULL]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(
-      `${JSON.stringify({ ok: true, warnings: [], repos: [ok("web"), ok("api")] })}\n`,
+      `${JSON.stringify({ ok: true, warnings: [], repos: [ok("web"), ok("api", "1 new commit")] })}\n`,
     );
-    expect(result.stderr.indexOf("✓ web")).toBeLessThan(
-      result.stderr.indexOf("✓ api"),
-    );
-    // git's own output is live on stderr, before the repo line.
-    expect(result.stderr).toContain("Already up to date.");
-    expect(result.stderr.indexOf("Fast-forward")).toBeLessThan(
-      result.stderr.indexOf("✓ api"),
-    );
+    // No raw git output: only one line per repo.
+    expect(result.stderr).toBe("✓ web: up to date\n✓ api: 1 new commit\n");
     expect(head("api")).toBe(target);
     expect(head("web")).toBe(webHead);
     expect(branch("web")).toBe("trunk");
@@ -216,21 +215,61 @@ describe("xr codebase pull", () => {
     const target = pushCommit(origins.api as string, { branch: "feat" });
     const result = await json(PULL);
     expect(result.code).toBe(0);
-    expect(result.data.repos).toEqual([ok("api")]);
+    expect(result.data.repos).toEqual([ok("api", "1 new commit")]);
     expect(branch("api")).toBe("feat");
     expect(head("api")).toBe(target);
   });
 
-  test("text mode: git output and one line per repo on stderr, the repo lines on stdout", async () => {
-    onDisk("api");
-    config(["api", "web"]);
+  test("text mode: only one line per repo on stderr, no git output, the repo lines on stdout", async () => {
+    onDisk("api", "docs");
+    config(["api", "web", "docs"]);
+    pushCommit(origins.docs as string);
+    pushCommit(origins.docs as string);
+    pushCommit(origins.docs as string);
     const result = await run(PULL);
     expect(result.code).toBe(0);
     const lines =
-      "✓ api\n– web: missing\n  Clone the missing repos with `xr codebase clone`.\n";
+      "✓ api: up to date\n– web: missing\n  Clone the missing repos with `xr codebase clone`.\n✓ docs: 3 new commits\n";
     expect(result.stdout).toBe(lines);
-    expect(result.stderr).toContain("Already up to date.");
-    expect(result.stderr).toEndWith(lines);
+    expect(result.stderr).toBe(lines);
+  });
+
+  test("--verbose: git's full output streams to stderr before each repo line", async () => {
+    onDisk("web", "api");
+    config(["web", "api"]);
+    pushCommit(origins.api as string);
+    const result = await run(["--verbose", ...PULL]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("✓ web: up to date\n✓ api: 1 new commit\n");
+    expect(result.stderr.indexOf("Already up to date.")).toBeLessThan(
+      result.stderr.indexOf("✓ web: up to date"),
+    );
+    expect(result.stderr).toMatch(/main +-> origin\/main/);
+    expect(result.stderr.indexOf("Fast-forward")).toBeLessThan(
+      result.stderr.indexOf("✓ api: 1 new commit"),
+    );
+  });
+
+  test("--json --verbose: no git output on stderr", async () => {
+    onDisk("api");
+    config(["api"]);
+    pushCommit(origins.api as string);
+    const result = await json(["--verbose", ...PULL]);
+    expect(result.code).toBe(0);
+    expect(result.data.repos).toEqual([ok("api", "1 new commit")]);
+    expect(result.stderr).toBe("✓ api: 1 new commit\n");
+  });
+
+  test("a failed repo: its line has the git error and the hint, no other git output", async () => {
+    onDisk("api");
+    config(["api"]);
+    pushCommit(origins.api as string);
+    git(dir("api"), "commit", "--quiet", "--allow-empty", "-m", "local");
+    const result = await run(PULL);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      `✗ api: fatal: Not possible to fast-forward, aborting.\n  Merge or rebase by hand in ${dir("api")}, ${again}\nerror: 1 of 1 repo failed: api.\n${PULL_FAILED_HINT}\n`,
+    );
   });
 
   test("a missing repo: skipped with the clone hint, git not run, exit 0", async () => {
@@ -274,7 +313,7 @@ describe("xr codebase pull", () => {
           message: "folder has no .git",
           hint: `Move or delete ${dir("api")}, then run \`xr codebase clone\` again.`,
         },
-        ok("web"),
+        ok("web", "1 new commit"),
       ],
       error: {
         code: "repos-failed",
@@ -312,7 +351,7 @@ describe("xr codebase pull", () => {
         message: "fatal: Not possible to fast-forward, aborting.",
         hint: `Merge or rebase by hand in ${dir("api")}, ${again}`,
       },
-      ok("web"),
+      ok("web", "1 new commit"),
     ]);
     expect(head("api")).toBe(local);
     expect(git(dir("api"), "log", "-1", "--format=%s").trim()).toBe("local");
@@ -603,7 +642,7 @@ describe("xr codebase pull Ctrl-C", () => {
     expect(result.data).toEqual({
       ok: false,
       warnings: [],
-      repos: [ok("api"), stopped("web"), stopped("docs")],
+      repos: [ok("api", "1 new commit"), stopped("web"), stopped("docs")],
       error: { code: "interrupted", message: "Stopped by Ctrl-C." },
     });
     expect(head("api")).toBe(apiTarget);

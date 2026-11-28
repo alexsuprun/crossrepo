@@ -352,7 +352,7 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
         ok: true,
         warnings: [],
         repos: [
-          { repo: "api", status: "ok" },
+          { repo: "api", status: "ok", message: "1 new commit" },
           {
             repo: "web",
             status: "skipped",
@@ -361,7 +361,8 @@ describe.each(runtimes)("dist/xr.js under %s", (_name, command) => {
           },
         ],
       });
-      expect(result.stderr).toContain("Fast-forward");
+      expect(result.stderr).toContain("✓ api: 1 new commit\n");
+      expect(result.stderr).not.toContain("Fast-forward");
       expect(git(join(codebase, "api"), "rev-parse", "HEAD").trim()).toBe(
         target,
       );

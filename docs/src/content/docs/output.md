@@ -14,7 +14,7 @@ Every command accepts these 4 flags:
 | `--codebase-path <path>` | Use the codebase at `<path>`. |
 | `--json` | Print the result as one JSON object on stdout. `xr` never asks questions. |
 | `--no-interactive` | Never ask questions. A command with a missing argument fails with `missing-argument` instead of opening a picker. |
-| `--verbose` | When `xr` crashes, print the stack trace on stderr. It changes nothing else. |
+| `--verbose` | When `xr` crashes, print the stack trace on stderr. `xr codebase pull` also shows git's full output on stderr, except with `--json`. It changes nothing else. |
 
 `xr` asks questions only when stdin and stdout are both a terminal, and neither `--json` nor `--no-interactive` is given. Then a missing argument, for example the repo name of `xr codebase repo remove`, opens a picker on stderr. Pick with the arrow keys and Enter. Ctrl-C or Escape stops the command with `interrupted` (exit code 130) and changes nothing. In every other case, `xr` never reads stdin: a missing argument fails with `missing-argument` and the message lists the choices. One exception: `xr project info` with no project in a codebase folder never opens a picker, also in a terminal. It always fails with `missing-argument`. `xr project remove` with no project in a project folder asks a yes/no question in a terminal, default No; No, Ctrl-C or Escape stop it with `interrupted`. Not in a terminal, it removes the current project with no question.
 

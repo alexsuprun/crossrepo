@@ -263,6 +263,7 @@ async function runCommand(
       env,
       stderr,
       progress: isTTY.stderr,
+      verbose: flags.verbose && !flags.json,
     }),
     config: configView(config),
     discovery,
@@ -371,7 +372,10 @@ export function createProgram({ write, help, select }: ProgramHooks): Command {
     .option("--codebase-path <path>", "path to the codebase")
     .option("--json", "print the result as one JSON object")
     .option("--no-interactive", "never ask questions")
-    .option("--verbose", "print the stack trace of an internal error")
+    .option(
+      "--verbose",
+      "print the stack trace of an internal error, and git's full output of `xr codebase pull`",
+    )
     .exitOverride()
     .configureOutput({
       writeOut: write,

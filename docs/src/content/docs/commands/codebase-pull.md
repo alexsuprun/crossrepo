@@ -9,7 +9,7 @@ description: Fast-forward the checked-out branch of each repo of the codebase.
 xr codebase pull
 ```
 
-It works only in a codebase folder, or with `--codebase-path <path>`. It has no arguments and no options of its own, only the [global flags](../../output/#global-flags).
+It works only in a codebase folder, or with `--codebase-path <path>`. It has no arguments and no options of its own, only the [global flags](../../output/#global-flags). By default it prints one short line per repo and hides git's own output; `--verbose` shows git's full output.
 
 ## What it does
 
@@ -17,7 +17,7 @@ The command takes the codebase lock, `.crossrepo/xr.lock`, then goes through the
 
 - When the folder `<codebase>/<name>` does not exist, the repo is `skipped` with the message `missing`. git does not run. The hint says to clone the missing repos with `xr codebase clone`.
 - When the folder `<codebase>/<name>` exists but has no `.git`, the repo is `failed` with the message `folder has no .git`. git does not run, and the folder is not touched. The hint says to move or delete it, then run `xr codebase clone` again.
-- Otherwise it runs `git pull --ff-only --no-rebase` in the repo. The repo is `ok` when git ends with no error, also when there was nothing new.
+- Otherwise it runs `git pull --ff-only --no-rebase` in the repo. The repo is `ok` when git ends with no error, also when there was nothing new. Its message says how many new commits the branch got, or `up to date`.
 
 git pulls the branch that is checked out, from the upstream that this branch has in git. The command never switches branches, and it does not use the `remote` of the config.
 
@@ -47,34 +47,39 @@ A failed repo has the git message: the first `fatal:` or `error:` line that git 
 
 ## Output
 
-git's own output, such as `From <url>`, `Fast-forward` and `Already up to date.`, goes to stderr. After each repo, stderr gets one line with its status:
+By default git's own output, such as `From <url>`, `Fast-forward` and `Already up to date.`, is not shown. After each repo, stderr gets one line with its status and a short result:
 
 ```text
-✓ api
+✓ api: 3 new commits
+✓ cli: up to date
 – web: missing
   Clone the missing repos with `xr codebase clone`.
 ✗ docs: fatal: Not possible to fast-forward, aborting.
   Merge or rebase by hand in /work/shop/docs, then run `xr codebase pull` again.
 ```
 
+A pulled repo shows `N new commits` (`1 new commit` for one), or `up to date` when the branch did not move. A failed repo shows git's error and the hint.
+
+With `--verbose`, git's full output goes to stderr as it comes, before the line of each repo. With `--json`, git's output is never shown, also with `--verbose`.
+
 On success stdout gets the same lines, one per repo, so a script that reads stdout gets the full list. When stdout and stderr are both the terminal, stdout gets nothing, so you see each line once. A codebase with no repos prints nothing. On a failure stdout stays empty, and stderr gets the error after the lines, with no second copy of the lines.
 
 | Symbol | Status | Meaning |
 | --- | --- | --- |
-| `✓` | `ok` | The repo was pulled, or it was up to date already. |
+| `✓` | `ok` | The repo was pulled (`N new commits`), or it was up to date already (`up to date`). |
 | `–` | `skipped` | The repo is not on disk, or Ctrl-C stopped the command before the repo was done. |
 | `✗` | `failed` | The repo could not be pulled. When there is a hint, it says what to do. |
 
 ## JSON
 
-With `--json`, stdout is one JSON object. `repos` lists every repo of the config once, in config order. Each item is `{ "repo", "status", "message"?, "hint"? }`; `message` and `hint` are there only when they are set. An `ok` repo has no message.
+With `--json`, stdout is one JSON object. `repos` lists every repo of the config once, in config order. Each item is `{ "repo", "status", "message"?, "hint"? }`; `message` and `hint` are there only when they are set. The message of an `ok` repo is `N new commits`, `1 new commit` or `up to date`.
 
 ```json
 {
   "ok": true,
   "warnings": [],
   "repos": [
-    { "repo": "api", "status": "ok" },
+    { "repo": "api", "status": "ok", "message": "3 new commits" },
     {
       "repo": "web",
       "status": "skipped",
@@ -92,7 +97,7 @@ On a failure, `repos` sits next to `error`:
   "ok": false,
   "warnings": [],
   "repos": [
-    { "repo": "api", "status": "ok" },
+    { "repo": "api", "status": "ok", "message": "up to date" },
     {
       "repo": "docs",
       "status": "failed",
